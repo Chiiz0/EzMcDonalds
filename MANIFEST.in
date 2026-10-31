@@ -10,4 +10,5 @@ recursive-exclude .tools *
 recursive-exclude downloads *
 recursive-exclude analysis *
 recursive-exclude artifacts *
+recursive-exclude tests *
 recursive-include tests test_project_*.py

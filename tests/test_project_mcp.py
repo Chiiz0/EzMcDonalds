@@ -35,8 +35,13 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertFalse(caps.is_error)
                 self.assertIn('"sms_login": false', caps.content[0].text)
                 pickup = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
-                result = await client.call_tool("checkout_quote", {"request": {"account": "demo", "store_code": "9000001",
-                    "pickup_at": pickup.isoformat(), "max_amount_cny": "20.00"}})
+                request = {"account": "demo", "store_code": "9000001", "pickup_at": pickup.isoformat(), "max_amount_cny": "20.00"}
+                detail = json.loads((await client.call_tool("product_detail", {"request": request, "product_code": "100001"})).content[0].text)
+                self.assertTrue(detail["simulation"])
+                added = json.loads((await client.call_tool("cart_add_configured", {"request": request,
+                    "items": [{"product_code": "100001", "quantity": 1}], "idempotency_key": "mcp-cart"})).content[0].text)
+                self.assertFalse(added["order_created"])
+                result = await client.call_tool("checkout_quote", {"request": request})
                 q = json.loads(result.content[0].text)
                 self.assertTrue(q["simulation"])
                 args = {"account": "demo", "quote_id": q["quote_id"], "idempotency_key": "mcp-breakfast"}
