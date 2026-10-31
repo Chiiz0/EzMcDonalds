@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ezmcdonalds": {
+      "command": "/absolute/path/to/project/.venv/bin/python",
+      "args": ["-m", "ezmcd.mcp_server"],
+      "env": {"EZMCD_DATA_DIR": "/absolute/path/to/private/data"}
+    }
+  }
+}

@@ -1,0 +1,13 @@
+include README.md
+include CHANGELOG.md
+include CONTRIBUTING.md
+include SECURITY.md
+recursive-include docs *.md
+exclude docs/prototype-history.md
+recursive-include examples *.json
+recursive-exclude .private *
+recursive-exclude .tools *
+recursive-exclude downloads *
+recursive-exclude analysis *
+recursive-exclude artifacts *
+recursive-include tests test_project_*.py
