@@ -15,6 +15,7 @@ from .storage import Store
 READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 CART = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 PAY = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
+AUTH = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
 
 
 def protected(fn):
@@ -43,10 +44,12 @@ def build_server(service):
             "accounts": "isolated official-session imports and local SMS login", "sms_login": True,
             "sms_login_scope": "local_terminal_existing_member_requires_observed_official_device_context",
             "sms_login_via_mcp": False, "session_auto_refresh": False,
+            "session_refresh": "explicit account_refresh; local 24h rotation interval, no ambiguous POST retries",
             "stores": "any store code with compatible live pickup menu and locker option",
             "products": "ordinary items and combos; fresh product_detail and cart_add_configured support standard component choices",
             "combo_configuration": "explicit choices for each round; advanced modifications use the official cart",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
+            "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
             "real_e2e_evidence": "one authorized account/store/breakfast combo; generalized purchase paths need acceptance",
             "automatic_retries": False, "automatic_schedule": False}
 
@@ -75,6 +78,12 @@ def build_server(service):
     def account_check(account: str) -> dict:
         """Verify the account session now and return wallet balance; never pays."""
         return service.check_account(account)
+
+    @server.tool(annotations=AUTH)
+    @protected
+    def account_refresh(account: str) -> dict:
+        """Maintain an existing session without SMS or purchases. May rotate credentials. Repeated calls within 24h only verify; an unknown refresh outcome requires local login. Does not renew checkout runtime."""
+        return service.refresh_account(account)
 
     @server.tool(annotations=READ)
     @protected

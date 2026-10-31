@@ -34,6 +34,8 @@ class Service:
         account = self.store.account(alias)
         if account.get("revoked"):
             raise EzMcdError("account_revoked_reconnect_locally")
+        if account.get("session_refresh", {}).get("state") in ("CLAIMED", "CANDIDATE", "STOPPED"):
+            raise EzMcdError("session_refresh_incomplete_resume_refresh_or_login_locally")
         if account["provider"] == "demo":
             from .demo import DemoProvider
             return account, DemoProvider(account, self.store)
@@ -42,7 +44,11 @@ class Service:
     def check_account(self, alias):
         account, provider = self.provider(alias)
         balance = provider.wallet()["balance_cents"]
-        return public_account(account) | {"session_status": "verified_now", "wallet_balance_cny": yuan(balance)}
+        return public_account(account, session_verified=True) | {"session_status": "verified_now", "wallet_balance_cny": yuan(balance)}
+
+    def refresh_account(self, alias):
+        from .sessions import refresh_account
+        return refresh_account(self.store, alias, provider_factory=self.provider_factory)
 
     def set_policy(self, alias, policy):
         # Local CLI only. This method is intentionally not registered as an MCP tool.

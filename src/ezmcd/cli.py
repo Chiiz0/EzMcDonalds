@@ -23,6 +23,8 @@ def main():
     account.add_parser("list")
     check = account.add_parser("check")
     check.add_argument("alias")
+    refresh = account.add_parser("refresh", help="Refresh an existing session once, or resume its read-only verification")
+    refresh.add_argument("alias")
     login = account.add_parser("login", help="Experimental direct SMS login; phone and code stay in the local terminal")
     login.add_argument("alias", nargs="?", default="personal")
     login.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
@@ -84,6 +86,8 @@ def main():
                 result = {"accounts": service.accounts()}
             elif args.action == "check":
                 result = service.check_account(args.alias)
+            elif args.action == "refresh":
+                result = service.refresh_account(args.alias)
             elif args.action == "login":
                 from .sms import interactive_login
                 result = interactive_login(store, args.alias, args.binary, args.device_from, args.resume)

@@ -48,4 +48,4 @@ ezmcd account login personal --resume returned-attempt-id
 
 已核对的 `707053` 返回 `OFFICIAL_ACTION_REQUIRED`。应由用户核对官方 App 登录、按官方提示完成必要验证；本工具不把它当成验证码延迟，不自动更换设备或改号码格式重发。当前没有实现该限制的官方验证交接流程。
 
-直接短信登录不等于自动续期或已具备下单运行字段。短信成功后的纯脚本购买仍遵守现有运行字段、报价、消费策略和防重复约束。
+登录返回刷新令牌时，可通过 `account refresh` 或 MCP 的 `account_refresh` 维护会话，详见[会话维护](session-maintenance.md)。这不等于已具备下单运行字段。短信成功后的纯脚本购买仍遵守现有运行字段、报价、消费策略和防重复约束。

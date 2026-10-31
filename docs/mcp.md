@@ -29,7 +29,8 @@
 | `capabilities` | 版本、支持范围、缺口 | 无 |
 | `account_connection_instructions` | 本地接入说明 | 无 |
 | `accounts_list` | 别名、脱敏标签、策略 | 无 |
-| `account_check` | 会话验证、余额 | 只读 |
+| `account_check` | 会话验证、余额、下单前置条件 | 只读 |
+| `account_refresh` | 已有账号会话维护、恢复核验 | 认证状态变更；不消费，不续期运行字段 |
 | `stores_favorites` | 收藏门店 | 只读 |
 | `store_get` | 按代码查店 | 只读 |
 | `pickup_slots` | 可预约时段 | 只读 |
@@ -44,6 +45,8 @@
 | `order_status` | 订单、付款、余额、取餐码 | 只读 |
 
 [工具行为注解](https://py.sdk.modelcontextprotocol.io/servers/tools/)用于提示客户端，不代替本机策略和持久化去重。
+
+账号刷新及重复调用规则见[会话维护](session-maintenance.md)。`readiness` 区分可浏览与下单前置条件，不替代实时订单检查。
 
 ## 报价请求
 
