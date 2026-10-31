@@ -33,7 +33,11 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(payment.annotations.destructive_hint)
                 caps = await client.call_tool("capabilities", {})
                 self.assertFalse(caps.is_error)
-                self.assertIn('"sms_login": false', caps.content[0].text)
+                self.assertIn('"sms_login": true', caps.content[0].text)
+                self.assertIn('"sms_login_via_mcp": false', caps.content[0].text)
+                self.assertNotIn("sms_send", names)
+                instructions = await client.call_tool("account_connection_instructions", {})
+                self.assertIn("--device-from", instructions.content[0].text)
                 pickup = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
                 request = {"account": "demo", "store_code": "9000001", "pickup_at": pickup.isoformat(), "max_amount_cny": "20.00"}
                 detail = json.loads((await client.call_tool("product_detail", {"request": request, "product_code": "100001"})).content[0].text)

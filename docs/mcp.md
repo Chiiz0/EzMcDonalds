@@ -20,6 +20,8 @@
 
 配置不含凭据。本机进程可以使用该目录中全部账号，只交给用户信任的个人Agent；没有跨用户HTTP鉴权。
 
+`capabilities.sms_login=true` 表示本地 CLI 已支持短信登录，不表示 MCP 能发送短信。个人 Agent 可用 `account_connection_instructions` 提示用户运行本地命令；手机号和验证码只在终端输入。完成后通过 `accounts_list` / `account_check` 使用新账号。
+
 ## 工具
 
 | 工具 | 作用 | 外部副作用 |

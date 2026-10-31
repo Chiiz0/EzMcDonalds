@@ -40,7 +40,9 @@ def build_server(service):
     def capabilities() -> dict:
         """Report implemented features and explicitly unverified or unsupported flows."""
         return {"version": __version__, "transport": "stdio", "market": "China mainland", "fulfillment": ["locker-in"],
-            "accounts": "isolated official-session imports", "sms_login": False, "session_auto_refresh": False,
+            "accounts": "isolated official-session imports and local SMS login", "sms_login": True,
+            "sms_login_scope": "local_terminal_existing_member_requires_observed_official_device_context",
+            "sms_login_via_mcp": False, "session_auto_refresh": False,
             "stores": "any store code with compatible live pickup menu and locker option",
             "products": "ordinary items and combos; fresh product_detail and cart_add_configured support standard component choices",
             "combo_configuration": "explicit choices for each round; advanced modifications use the official cart",
@@ -51,7 +53,11 @@ def build_server(service):
     @server.tool(annotations=READ)
     def account_connection_instructions() -> dict:
         """Explain local enrollment; do not paste session files, SMS codes, or tokens into chat."""
-        return {"method": "official_login_then_local_import", "sms_login_implemented": False,
+        return {"method": "official_device_bootstrap_then_local_sms_or_session_import", "sms_login_implemented": True,
+            "sms_login": {"entry": "ezmcd account login NEW_ALIAS --device-from EXISTING_ALIAS",
+                "requires": "user-owned official device context from a locally connected account",
+                "input": "phone and SMS code in local terminal only, never chat or MCP",
+                "checkout_runtime": "not supplied by SMS login"},
             "steps": ["User logs into the official App with their own phone number.",
                       "Export only the authorized official balance exchange to a private local HAR or sample file.",
                       "Run ezmcd account connect --har locally; same-session v5 evidence is additionally required for checkout.",

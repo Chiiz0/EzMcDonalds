@@ -23,6 +23,11 @@ def main():
     account.add_parser("list")
     check = account.add_parser("check")
     check.add_argument("alias")
+    login = account.add_parser("login", help="Experimental direct SMS login; phone and code stay in the local terminal")
+    login.add_argument("alias", nargs="?", default="personal")
+    login.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
+    login.add_argument("--device-from", help="Reuse only the observed device fields of a locally imported account, never its session")
+    login.add_argument("--resume", help="Resume one existing attempt without sending another SMS")
     connect = account.add_parser("import")
     connect.add_argument("alias")
     connect.add_argument("--profile", required=True, help="Local validated session JSON; never paste into chat")
@@ -79,6 +84,9 @@ def main():
                 result = {"accounts": service.accounts()}
             elif args.action == "check":
                 result = service.check_account(args.alias)
+            elif args.action == "login":
+                from .sms import interactive_login
+                result = interactive_login(store, args.alias, args.binary, args.device_from, args.resume)
             elif args.action == "import":
                 result = import_session(store, args.alias, args.profile, args.binary, args.runtime_sample,
                                         args.phone_label, update=args.update)
@@ -121,8 +129,13 @@ def main():
         else:
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.command == "account" and args.action == "login" and result.get("state") != "CONNECTED":
+            return 2
     except EzMcdError as error:
         print(json.dumps({"ok": False, "error": error.code, "automatic_write_retry": False}), file=sys.stderr)
+        return 2
+    except (KeyboardInterrupt, EOFError):
+        print('{"ok":false,"error":"local_login_input_cancelled","automatic_write_retry":false}', file=sys.stderr)
         return 2
     except (OSError, ValueError, KeyError, TypeError, ValidationError):
         print('{"ok":false,"error":"invalid_local_configuration_or_response","automatic_write_retry":false}', file=sys.stderr)

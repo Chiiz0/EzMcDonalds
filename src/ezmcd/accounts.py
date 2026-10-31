@@ -126,7 +126,8 @@ def revoke_local(store, alias):
 def public_account(record):
     runtime = record.get("runtime")
     return {"account": record["alias"], "provider": record["provider"],
-        "phone_label": record.get("phone_label"), "auth_method": "offline_demo" if record["provider"] == "demo" else "official_session_import",
-        "session_status": "revoked_locally" if record.get("revoked") else "imported_verify_with_account_check", "sms_login_supported": False,
+        "phone_label": record.get("phone_label"), "auth_method": "offline_demo" if record["provider"] == "demo" else record.get("auth_method", "official_session_import"),
+        "session_status": "revoked_locally" if record.get("revoked") else "connected_verify_with_account_check",
+        "sms_login_supported": record["provider"] == "mcd-cn", "sms_login_requires_official_device_context": True,
         "runtime_available": bool(runtime and 0 <= time.time() - runtime["observed_at"] <= 86400),
         "policy": record["policy"]}

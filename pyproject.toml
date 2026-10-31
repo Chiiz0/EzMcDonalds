@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ezmcdonalds"
-version = "0.1.0a1"
+version = "0.1.0a2"
 description = "Local-first McDonald's China pickup ordering for personal agents"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{name = "Chiiz0"}]
-dependencies = ["blake3==1.0.11", "mcp==2.3.0", "pydantic>=2.12,<3"]
+dependencies = ["blake3==1.0.11", "mcp==2.3.0", "pydantic>=2.12,<3", "cryptography>=46,<51"]
 
 [project.urls]
 Repository = "https://github.com/Chiiz0/EzMcDonalds"
