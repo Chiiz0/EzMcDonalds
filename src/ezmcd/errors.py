@@ -8,6 +8,7 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "variant_combo_schema_or_price_changed": ("该套餐规格的轮次、默认份数或价格公式不符合已支持结构。", "重新读取父商品详情；不要猜测加价或把规格展示价再叠加默认饮品费用。此时可在官方 App 配置后核对购物车。"),
         "sampling_capture_directory_invalid": ("这不是当前数据目录内的私有采样目录。", "使用本次 sampling-capture 输出的 captures/编号 目录，保持原目录和权限，不使用符号链接或其他账号的数据目录。"),
         "sampling_capture_binding_missing": ("采样缺少新版账号绑定记录。", "旧版样本仍可按凭据指引使用 account connect --update 显式导入；自动恢复只接受新版完整采样，不能补写绑定字段。"),
         "sampling_capture_incomplete": ("采样没有同时完成余额和运行字段校验。", "先完成 App 退出和代理恢复，再准备新的采样；不导入部分结果。"),

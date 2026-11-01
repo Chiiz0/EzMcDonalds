@@ -132,7 +132,7 @@ class VariantTests(unittest.TestCase):
 
     def test_sold_out_unpriced_complex_or_missing_child_is_not_guessed(self):
         for field, value in (("unsellable", True), ("unsellable", None), ("price", 0), ("price", True),
-                             ("price", "1000"), ("type", 7), ("products", [{}]), ("name", None)):
+                             ("price", "1000"), ("type", 8), ("products", [{}]), ("name", None)):
             raw = detail(); raw["product"]["products"][0][field] = value
             with self.subTest(field=field, value=value), self.assertRaisesRegex(EzMcdError, "requires_official_configuration"):
                 resolve_variant(raw, self.offer, "100001")

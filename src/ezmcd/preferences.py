@@ -2,7 +2,7 @@
 from datetime import datetime, timedelta
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import EzMcdError
 from .models import CheckoutInput, ItemSelection, SHANGHAI, cents, fingerprint, yuan
@@ -42,11 +42,20 @@ class PreferredItem(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=120)
     variant_of: str | None = Field(default=None, min_length=1, max_length=120)
+    variant_specifications: dict[str, str] | None = Field(default=None, min_length=1, max_length=6,
+                                                        exclude_if=lambda value: value is None)
     coupon_name: str | None = Field(default=None, min_length=1, max_length=120)
     quantity: int = Field(default=1, ge=1, le=20)
     component_names: list[str] = Field(default_factory=list, max_length=20)
     modifiers: list[PreferredModifier] = Field(default_factory=list, max_length=20)
     component_modifiers: list[PreferredComponentModifiers] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def variant_labels(self):
+        if self.variant_specifications is not None and (not self.variant_of or any(
+                not text.strip() or len(text) > 120 for pair in self.variant_specifications.items() for text in pair)):
+            raise ValueError("Variant specification names require a parent and nonempty names from product_detail")
+        return self
 
     @field_validator("modifiers")
     @classmethod
@@ -299,6 +308,12 @@ def plan_meal(service, account=None, date=None):
             parent = next(iter(parents.values()))
             parent_detail = provider.product_detail(request, parent["product_code"], parent["offer_id"])
             variants = [v for v in parent_detail["variants"] if v["name"] == preference.name and v.get("parent_detail_selection")]
+            if preference.variant_specifications:
+                def matches(variant):
+                    choices = variant.get("specification_choices", [])
+                    names = {c["group_name"]: c["choice_name"] for c in choices}
+                    return len(names) == len(choices) and all(names.get(k) == v for k, v in preference.variant_specifications.items())
+                variants = [v for v in variants if matches(v)]
             if len(variants) != 1:
                 issues.append({"reason": "preferred_variant_unavailable_or_unsupported", "name": preference.name,
                                "variants": parent_detail["variants"]})
@@ -353,11 +368,13 @@ def plan_meal(service, account=None, date=None):
         selections.append(selection.model_dump(exclude_none=True))
         descriptions.append({"name": offer["name"], "card_name": offer.get("card_name"), "coupon_name": preference.coupon_name,
                              "variant_of": preference.variant_of,
+                             **({"variant_specifications": preference.variant_specifications} if preference.variant_specifications else {}),
                              "quantity": preference.quantity, "components": preference.component_names,
                              "modifiers": [m.model_dump(exclude_none=True) for m in preference.modifiers],
                              "component_modifiers": [m.model_dump(exclude_none=True) for m in preference.component_modifiers]})
         if estimate is not None:
-            estimate = estimate + (cents(offer["display_price_cny"]) + extra) * preference.quantity if offer.get("display_price_cny") is not None and extra is not None else None
+            base = detail.get("configuration_base_cny", offer.get("display_price_cny"))
+            estimate = estimate + (cents(base) + extra) * preference.quantity if base is not None and extra is not None else None
     if estimate is not None and estimate > cents(preferences.max_amount_cny):
         issues.append({"reason": "estimated_price_exceeds_preference_limit"})
     key = "meal-" + fingerprint({"account": alias, "store_code": request.store_code, "pickup_at": request.pickup_at})[:32]

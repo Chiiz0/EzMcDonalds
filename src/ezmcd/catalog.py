@@ -1,6 +1,7 @@
 """Normalize live menus and validate checkout without a fixed store or meal."""
 from copy import deepcopy
 from datetime import datetime
+import re
 from urllib.parse import urlsplit
 
 from .errors import EzMcdError
@@ -170,8 +171,12 @@ def cart_regular_subtotal(product):
         if type(value) is int and value >= 0:
             return value
         raise EzMcdError("cart_product_price_structure_unverified")
+    # Ordinary combos can use originPrice=0 as a placeholder, with no subtotal.
+    # Only the observed undiscounted shape is accepted; checkout additionally
+    # compares the confirmation unit/row prices and disallows order discounts.
+    if str(product.get("type")) == "7":
+        return regular_combo_subtotal(product)
     # Observed ordinary-item carts omit subTotalPrice, retaining unit prices.
-    # Do not extrapolate this fallback to coupons, combos or modifications.
     original, actual, quantity = (product.get(k) for k in ("originPrice", "realPrice", "quantity"))
     if (str(product.get("type")) != "1" or any(product.get(k) for k in (
             "coupon", "comboItems", "customization", "modification", "grills", "biasChoices"))
@@ -181,6 +186,38 @@ def cart_regular_subtotal(product):
             or actual * quantity != product["realSubTotalPrice"]):
         raise EzMcdError("cart_product_price_structure_unverified")
     return original * quantity
+
+
+def regular_combo_subtotal(product):
+    from .modifiers import configuration_keys
+    try:
+        original, actual, quantity = (product.get(k) for k in ("originPrice", "realPrice", "quantity"))
+        if (any(type(v) is not int for v in (original, actual, quantity)) or original != 0
+                or not 0 < actual <= 100000 or not 1 <= quantity <= 20
+                or type(product.get("realSubTotalPrice")) is not int or actual * quantity != product["realSubTotalPrice"]
+                or any(product.get(k) for k in ("coupon", "customization", "modification", "grills", "biasChoices"))):
+            raise ValueError
+        groups = product.get("comboItems")
+        if not isinstance(groups, list) or not 1 <= len(groups) <= 20:
+            raise ValueError
+        rounds = set()
+        for group in groups:
+            number, parts = group["round"], group["comboProducts"]
+            if (type(number) is not int or number in rounds or not isinstance(parts, list) or not 1 <= len(parts) <= 20):
+                raise ValueError
+            rounds.add(number)
+            codes = set()
+            for part in parts:
+                code = part["code"]
+                if (not isinstance(code, str) or not re.fullmatch(r"[0-9]{1,20}", code) or code in codes
+                        or type(part.get("quantity")) is not int or not 1 <= part["quantity"] <= 20
+                        or part.get("coupon") or part.get("comboItems") or part.get("products")):
+                    raise ValueError
+                codes.add(code)
+                configuration_keys(part)  # Existing free-modifier echo checks.
+    except (EzMcdError, AttributeError, KeyError, TypeError, ValueError):
+        raise EzMcdError("cart_product_price_structure_unverified") from None
+    return actual * quantity
 
 
 def checkout(args, cart, confirmation, daypart):
@@ -203,6 +240,8 @@ def checkout(args, cart, confirmation, daypart):
             or cart.get("realTotalPrice") != amount or cart.get("totalPrice") != regular
             or cart.get("discountAmount") != discount or cart.get("realDeliveryPrice", 0) != 0):
         raise EzMcdError("price_changed_or_exceeds_limit")
+    if any(str(p.get("type")) == "7" and "subTotalPrice" not in p for p in products) and discount != 0:
+        raise EzMcdError("cart_product_price_structure_unverified")
     rows = price.get("cartProductList", [])
     by_sequence = {str(p["sequence"]): p for p in products}
     if len(rows) != len(products) or len(by_sequence) != len(products):
@@ -217,7 +256,8 @@ def checkout(args, cart, confirmation, daypart):
                 or str(row.get("productType")) != str(p["type"]) or row.get("saleStatus") != 1
                 or not row.get("uniqueKey") or cents(row.get("realSubtotal")) != p["realSubTotalPrice"]
                 or cents(row.get("subtotal")) != cart_regular_subtotal(p)
-                or "subTotalPrice" not in p and cents(row.get("price")) != p["originPrice"]):
+                or "subTotalPrice" not in p and cents(row.get("price")) != (
+                    p["realPrice"] if str(p.get("type")) == "7" else p["originPrice"])):
             raise EzMcdError("confirmation_product_mismatch")
         seen.add(seq)
         verify_confirmation_components(p, row.get("comboItemList", []))

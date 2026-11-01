@@ -147,7 +147,9 @@ class McdProvider:
         if variant_of:
             result.update(variant_of=variant_of, display_price_cny=yuan(offer["priceInfo"]["eatInPrice"]),
                 pricing_source="regular_parent_variant_detail", optional_promotions_present=offer["_optional_promotions"],
-                related_products_selected=False)
+                related_products_selected=False, specification_choices=offer["_variant_specifications"],
+                configuration_base_cny=yuan(offer["_configuration_base_cents"]),
+                default_components_extra_cny=yuan(offer["priceInfo"]["eatInPrice"] - offer["_configuration_base_cents"]))
         if coupon:
             result.update(coupon_ref=coupon_ref, coupon=public_coupon(coupon))
             if offer["_coupon_configuration_issues"]:
@@ -167,6 +169,8 @@ class McdProvider:
                 variant["parent_detail_selection"] = {"product_code": variant["product_code"],
                     "variant_of": product_code, "offer_id": offer["offer_id"]}
                 variant["optional_promotions_present"] = resolved["_optional_promotions"]
+                variant["specification_choices"] = resolved["_variant_specifications"]
+                variant["configuration_base_cny"] = yuan(resolved["_configuration_base_cents"])
             except EzMcdError as error:
                 variant["parent_detail_issue"] = error.code
             variant["next_step"] = ("product_detail_with_variant_code_and_menu_offer" if variant["menu_offers"] else

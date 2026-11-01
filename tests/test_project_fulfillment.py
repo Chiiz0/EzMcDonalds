@@ -185,3 +185,59 @@ class OrdinaryCartPriceTests(unittest.TestCase):
                        {"comboItems": [{}]}, {"modification": {"values": [{}]}}, {"grills": [{}]}):
             with self.subTest(change=change), self.assertRaisesRegex(EzMcdError, "cart_product_price_structure_unverified"):
                 cart_regular_subtotal(self.product | change)
+
+
+class OrdinaryComboPriceTests(unittest.TestCase):
+    def setUp(self):
+        OrdinaryCartPriceTests.setUp(self)
+        self.args = self.args.model_copy(update={'max_amount_cny': '30'})
+        self.product.update(type=7, quantity=1, originPrice=0, realPrice=2400, realSubTotalPrice=2400,
+            comboItems=[{'round': 1, 'comboProducts': [{'code': '7001', 'quantity': 1}]},
+                        {'round': 2, 'comboProducts': [{'code': '7002', 'quantity': 1}]}])
+        self.cart.update(realTotalPrice=2400, totalPrice=2400)
+        self.row.update(productType=7, quantity=1, price='24.00', realSubtotal='24.00', subtotal='24.00',
+                        comboItemList=[{'productCode': '7001', 'quantity': 1}, {'productCode': '7002', 'quantity': 1}])
+        self.confirmation['productPriceInfo'].update(realTotalAmount='24.00', totalAmount='24.00')
+
+    def test_zero_origin_placeholder_uses_confirmed_unit_and_row_amounts(self):
+        quote = checkout(self.args, self.cart, self.confirmation, '2')
+        self.assertEqual(quote['amount_cents'], 2400)
+        self.assertEqual(quote['regular_cents'], 2400)
+        self.assertEqual(quote['body']['cartItems'][0]['productPrice'], '24.00')
+
+    def test_combo_without_subtotal_still_enforces_total_budget(self):
+        with self.assertRaisesRegex(EzMcdError, 'price_changed_or_exceeds_limit'):
+            checkout(self.args.model_copy(update={'max_amount_cny': '20'}), self.cart, self.confirmation, '2')
+
+    def test_unit_subtotal_or_component_mismatch_still_blocks_quote(self):
+        for key, value in (('price', '0.00'), ('price', '23.00'), ('subtotal', '0.00'), ('realSubtotal', '23.00'),
+                           ('comboItemList', [{'productCode': '7003', 'quantity': 1}])):
+            row = dict(self.row)
+            self.row[key] = value
+            with self.subTest(key=key, value=value), self.assertRaises(EzMcdError):
+                checkout(self.args, self.cart, self.confirmation, '2')
+            self.row.clear(); self.row.update(row)
+
+    def test_inconsistent_or_unobserved_combo_shape_is_rejected(self):
+        for change in ({'originPrice': 2400}, {'originPrice': False}, {'realPrice': 0}, {'realPrice': 2300},
+                       {'realSubTotalPrice': 2300}, {'quantity': True}, {'comboItems': []},
+                       {'comboItems': [{'round': 1, 'comboProducts': []}]},
+                       {'coupon': {'id': 'synthetic'}}, {'modification': {'values': []}}):
+            with self.subTest(change=change), self.assertRaisesRegex(EzMcdError, 'price_structure_unverified'):
+                cart_regular_subtotal(self.product | change)
+
+    def test_placeholder_combo_does_not_extend_to_discounts(self):
+        self.cart.update(realTotalPrice=2300, discountAmount=100)
+        self.product.update(realPrice=2300, realSubTotalPrice=2300)
+        self.row['realSubtotal'] = '23.00'
+        self.confirmation['productPriceInfo'].update(realTotalAmount='23.00', discountAmount='1.00')
+        with self.assertRaisesRegex(EzMcdError, 'price_structure_unverified'):
+            checkout(self.args, self.cart, self.confirmation, '2')
+
+    def test_multiple_combo_quantity_keeps_per_combo_component_counts(self):
+        self.product.update(quantity=2, realSubTotalPrice=4800)
+        self.cart.update(realTotalPrice=4800, totalPrice=4800)
+        self.row.update(quantity=2, realSubtotal='48.00', subtotal='48.00')
+        self.confirmation['productPriceInfo'].update(realTotalAmount='48.00', totalAmount='48.00')
+        quote = checkout(self.args.model_copy(update={'max_amount_cny': '50'}), self.cart, self.confirmation, '2')
+        self.assertEqual(quote['amount_cents'], 4800)
