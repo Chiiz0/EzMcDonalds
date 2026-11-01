@@ -43,10 +43,10 @@ def capture_outcome(audit):
 
 
 class RuntimeCapture:
-    def __init__(self, store, alias, *, service="Wi-Fi", seconds=120, mitmdump=None, refresh_from=None, report=None):
+    def __init__(self, store, alias, *, service="Wi-Fi", seconds=120, mitmdump=None, refresh_from=None, report=None, manage_app=False):
         if (not isinstance(service, str) or not service.strip() or service.startswith("-")
                 or len(service) > 120 or any(ord(c) < 32 for c in service)
-                or type(seconds) is not int or not 30 <= seconds <= 120):
+                or type(seconds) is not int or not 30 <= seconds <= 120 or type(manage_app) is not bool):
             raise EzMcdError("sampling_options_invalid")
         self.store, self.alias = store, alias
         self.service, self.seconds = service, seconds
@@ -55,6 +55,22 @@ class RuntimeCapture:
         self.report = report or (lambda value: print(json.dumps(value, ensure_ascii=False), file=sys.stderr, flush=True))
         self.directory = store.root / "captures" / uuid.uuid4().hex
         self.ca = SamplingCertificate(store)
+        self.manage_app = manage_app
+        self.app = None
+        self.app_close_failed = False
+
+    def close_managed_app(self):
+        if self.app is None or self.app_close_failed:
+            return
+        try:
+            self.app.request_close()
+        except EzMcdError:
+            self.app_close_failed = True
+            self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED",
+                "next": "未能安全退出官方 App，请手动退出；代理阻断保持到 App 与启动器均已结束。"})
+
+    def launch_pending(self):
+        return self.app is not None and self.app.launch_pending()
 
     @staticmethod
     def command(args, *, check=True):
@@ -130,6 +146,16 @@ class RuntimeCapture:
                 or any(effective_before.get(k, "0") != "0" for k in
                        ("HTTPEnable", "HTTPSEnable", "SOCKSEnable", "ProxyAutoConfigEnable", "ProxyAutoDiscoveryEnable"))):
             raise EzMcdError("sampling_existing_proxy_requires_review")
+        if self.manage_app:
+            from .sampling_app import SamplingApp
+            self.app = SamplingApp(account["binary"])
+            self.app.validate()
+            self.report({"stage": "APP_PREPARING", "next": "正在核对并退出本人官方 App，尚未启用代理。"})
+            self.app.request_close()
+            for _ in range(20):
+                if not self.app_running():
+                    break
+                time.sleep(.25)
         if self.app_running():
             raise EzMcdError("sampling_close_official_app_first")
         secure_directory(self.directory)
@@ -186,13 +212,21 @@ class RuntimeCapture:
             if (effective.get("HTTPSEnable"), effective.get("HTTPSProxy"), effective.get("HTTPSPort")) != ("1", "127.0.0.1", str(PORT)):
                 raise EzMcdError("sampling_effective_proxy_mismatch")
             self.report({"stage": "GUARD_ACTIVE", "seconds": self.seconds,
-                "next": "现在启动官方 App，先打开麦钱包余额，再操作已准备的购物车。订单会被本地阻断；见无订单采样指引。"})
+                "next": ("工具正在打开官方 App。" if self.app is not None else "现在启动官方 App。") +
+                        "先打开麦钱包余额，再操作已准备的购物车。订单会被本地阻断；见无订单采样指引。"})
+            if self.app is not None and not stop and time.time() <= deadline:
+                self.app.start()
             while not self.app_running() and not stop and time.time() <= deadline:
                 if process.poll() is not None:
                     raise EzMcdError("sampling_guard_listener_failed")
+                if self.app is not None and self.app.launch_failed():
+                    raise EzMcdError("sampling_managed_app_launch_failed")
+                if self.app is not None and not self.launch_pending():
+                    break
                 time.sleep(.25)
             warned = balance_announced = False
-            while self.app_running():
+            close_requested_at = None
+            while self.app_running() or self.launch_pending():
                 state = read_private(self.directory / "audit.json")
                 if state["balance_saved"] and not balance_announced:
                     seconds_remaining = max(0, math.ceil(deadline - time.time()))
@@ -203,15 +237,27 @@ class RuntimeCapture:
                                 else "余额样本已校验，本轮正在收尾。不要继续提交；请退出官方 App。"})
                     balance_announced = True
                 if (stop or time.time() > deadline or state["runtime_saved"] or process.poll() is not None) and not warned:
-                    self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next": "请退出麦当劳；若卡住，只强制退出麦当劳。关闭后才恢复代理。"})
+                    self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next":
+                        ("工具正在请求退出麦当劳；失败时需手动处理。" if self.app is not None else "请退出麦当劳；若卡住，只强制退出麦当劳。") + "关闭后才恢复代理。"})
                     warned = True
+                    close_requested_at = time.monotonic()
+                if warned and self.app is not None:
+                    self.close_managed_app()
+                    if not self.app_close_failed and time.monotonic() - close_requested_at > 5:
+                        self.app_close_failed = True
+                        self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED", "next": "App 或启动器尚未退出，请手动关闭麦当劳；代理阻断保持。"})
                 time.sleep(.25)
         finally:
             try:
                 if touched:
-                    if self.app_running():
+                    if self.app_running() or self.launch_pending():
                         self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next": "代理仍在阻断。请先退出麦当劳，再等待清理完成。"})
-                    while self.app_running():
+                    close_requested_at = time.monotonic()
+                    while self.app_running() or self.launch_pending():
+                        self.close_managed_app()
+                        if self.app is not None and not self.app_close_failed and time.monotonic() - close_requested_at > 5:
+                            self.app_close_failed = True
+                            self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED", "next": "App 或启动器尚未退出，请手动关闭麦当劳；代理阻断保持。"})
                         time.sleep(.25)
                     for args in (["-setsecurewebproxystate", self.service, "off"],
                                  ["-setsecurewebproxy", self.service, before["Server"], before["Port"]],
@@ -233,6 +279,7 @@ class RuntimeCapture:
                     errors.append("proxy_verification")
                 write_private(self.directory / "cleanup.json", {"proxy_before": before, "proxy_after": after,
                     "cleanup_errors": sorted(set(errors)), "official_app_closed": not self.app_running(),
+                    "managed_app": self.manage_app, "app_launch_pending": self.launch_pending(),
                     "persistent_certificate_retained": True})
                 self.report({"stage": "CLEANUP_RESULT", "proxy_restored": after == before,
                     "persistent_certificate_retained": True, "errors": sorted(set(errors)),
@@ -250,6 +297,7 @@ class RuntimeCapture:
             "balance_sample": str(self.directory / "balance.json") if audit["balance_saved"] else None,
             "runtime_sample": str(self.directory / "runtime.json") if audit["runtime_saved"] else None,
             "account_updated": False, "certificate_retained": True, "proxy_restored": True,
+            "managed_app": self.manage_app,
             "order_requests_forwarded": 0, "payment_requests_forwarded": 0,
             "balance_error": audit.get("balance_error"), "balance_header_checks": audit.get("balance_header_checks"),
             **outcome}

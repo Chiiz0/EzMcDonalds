@@ -67,6 +67,19 @@ class SamplingConsoleTests(unittest.TestCase):
         self.console({'stage': 'CLOSE_OFFICIAL_APP_NOW'})
         self.assertIn('退出前阻断继续保留', self.output.getvalue())
 
+    def test_managed_mode_explains_automatic_lifecycle_and_manual_fallback(self):
+        console=SamplingConsole(stdin=self.input,stderr=self.output,manage_app=True)
+        console.ready('synthetic',120)
+        console({'stage':'APP_PREPARING'})
+        console({'stage':'GUARD_ACTIVE'})
+        console({'stage':'CLOSE_OFFICIAL_APP_NOW'})
+        console({'stage':'APP_MANUAL_CLOSE_REQUIRED','next':'secret diagnostic'})
+        text=self.output.getvalue()
+        self.assertIn('工具正在打开官方 App',text)
+        self.assertIn('工具正在请求退出麦当劳',text)
+        self.assertIn('代理阻断仍保留',text)
+        self.assertNotIn('secret diagnostic',text)
+
     def test_cleanup_failure_is_not_presented_as_restored(self):
         for event in ({'proxy_restored': False, 'errors': []},
                       {'proxy_restored': True, 'errors': ['proxy_verification']}, {}):
@@ -93,12 +106,14 @@ class SamplingConsoleTests(unittest.TestCase):
 
 
 class SamplingConsoleCliTests(unittest.TestCase):
-    def run_cli(self, value, *, interactive=True, record=None):
+    def run_cli(self, value, *, interactive=True, record=None, manage_app=False):
         from ezmcd.cli import main
         with tempfile.TemporaryDirectory() as root:
             args=['ezmcd','--data-dir',root,'sampling-capture','synthetic','--update-account']
             if interactive:
                 args.append('--interactive')
+            if manage_app:
+                args.append('--manage-app')
             output, error = io.StringIO(), Terminal()
             events = []
             input = Terminal(value)
@@ -120,6 +135,8 @@ class SamplingConsoleCliTests(unittest.TestCase):
                     return {'runtime_saved':True,'balance_saved':True,'capture_directory':str(Path(root)/'capture')}
                 capture.return_value.run.side_effect=run
                 code=main()
+                if capture.called:
+                    self.assertEqual(capture.call_args.kwargs['manage_app'],manage_app)
                 return code, output.getvalue(), error.getvalue(), events, capture.return_value.run.call_count, importer.call_count
 
     def test_cli_waits_before_capture_keeps_final_stdout_json_and_imports_once(self):
@@ -134,6 +151,11 @@ class SamplingConsoleCliTests(unittest.TestCase):
         self.assertEqual((code, events, captures, imports), (2, ['prompt'], 0, 0))
         self.assertEqual(output, '')
         self.assertIn('sampling_cancelled_before_start', error)
+
+    def test_managed_cli_cancel_never_runs_capture_or_app_controls(self):
+        code, output, error, events, captures, imports = self.run_cli('q\n',manage_app=True)
+        self.assertEqual((code,events,captures,imports),(2,['prompt'],0,0))
+        self.assertIn('工具会尝试退出和重新打开',error)
 
     def test_invalid_or_revoked_account_does_not_ask_user_to_prepare(self):
         for record in ({'provider':'demo'}, {'provider':'mcd-cn','revoked':True}):

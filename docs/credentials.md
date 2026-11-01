@@ -70,6 +70,8 @@ Mac 已有账号可使用[无订单采样命令](guarded-capture.md)：复用持
 
 在本机终端使用 `ezmcd sampling-capture personal --interactive --update-account`，先读准备步骤并按回车，再在同一终端按实时中文提示完成采样。代理恢复后自动完成两个只读核验并导入，省去手动复制样本文件路径。导入失败可用输出目录运行 `ezmcd sampling-import personal /absolute/path/data/captures/采样编号`，保留旧账号并继续核验；成功后重复调用不重写凭据。它仍保留原采样期限和消费策略。
 
+可额外加 `--manage-app`，让工具校验本人的官方客户端并处理采样前退出、保护就绪后打开及结束时退出；进程不匹配或退出失败时转为手动处理，App 及启动器结束前保持阻断。该选项不操作钱包、购物车或登录页面。
+
 已有本人近期官方样本时，无需重新导入整个账号：
 
 ```sh

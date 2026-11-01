@@ -46,6 +46,98 @@ class SamplingTests(unittest.TestCase):
     def run_capture(self):
         return self.capture._run(self.account,self.root/'ca','/synthetic/mitmdump','synthetic-session-hash')
 
+    def managed_app(self):
+        self.capture.manage_app=True
+        app=Mock()
+        app.validate.side_effect=lambda:self.calls.append(['app-validate'])
+        def close():
+            self.calls.append(['app-close'])
+            self.running=False
+        def start():
+            self.calls.append(['app-start'])
+            self.running=True;self.started=True
+        app.request_close.side_effect=close;app.start.side_effect=start
+        app.launch_pending.return_value=False;app.launch_failed.return_value=False
+        p=patch('ezmcd.sampling_app.SamplingApp',return_value=app);p.start();self.addCleanup(p.stop)
+        return app
+
+    def test_managed_lifecycle_closes_before_proxy_and_launches_only_after_guard(self):
+        app=self.managed_app();self.running=True
+        self.capture.probe.side_effect=lambda *_:self.calls.append(['probe'])
+        result=self.run_capture()
+        self.assertTrue(result['managed_app'])
+        self.assertLess(self.calls.index(['app-close']),self.calls.index(['probe']))
+        on=['/usr/sbin/networksetup','-setsecurewebproxystate','Wi-Fi','on']
+        off=['/usr/sbin/networksetup','-setsecurewebproxystate','Wi-Fi','off']
+        self.assertLess(self.calls.index(on),self.calls.index(['app-start']))
+        self.assertLess(self.calls.index(['app-start']),self.calls.index(off))
+        self.assertEqual(app.request_close.call_count,2)
+        self.assertFalse(read_private(self.capture.directory/'cleanup.json')['app_launch_pending'])
+
+    def test_managed_unsupported_app_stops_before_any_lifecycle_or_proxy(self):
+        app=self.managed_app();app.validate.side_effect=EzMcdError('sampling_managed_app_unsupported')
+        with self.assertRaisesRegex(EzMcdError,'unsupported'):self.run_capture()
+        app.start.assert_not_called();app.request_close.assert_not_called()
+        self.assertEqual(self.calls,[])
+
+    def test_managed_preparation_cannot_close_unverified_process(self):
+        app=self.managed_app();app.request_close.side_effect=EzMcdError('sampling_managed_app_process_changed')
+        with self.assertRaisesRegex(EzMcdError,'process_changed'):self.run_capture()
+        app.start.assert_not_called();self.process.terminate.assert_not_called()
+        self.assertEqual(self.calls,[['app-validate']])
+
+    def test_managed_preflight_failure_never_opens_app(self):
+        app=self.managed_app();self.capture.probe.side_effect=EzMcdError('sampling_guard_preflight_failed')
+        with self.assertRaisesRegex(EzMcdError,'preflight_failed'):self.run_capture()
+        app.start.assert_not_called()
+        self.assertFalse(any(args[0]=='/usr/sbin/networksetup' for args in self.calls))
+
+    def test_managed_launch_failure_restores_proxy(self):
+        app=self.managed_app();app.start.side_effect=EzMcdError('sampling_managed_app_launch_failed')
+        with self.assertRaisesRegex(EzMcdError,'launch_failed'):self.run_capture()
+        self.assertEqual(read_private(self.capture.directory/'cleanup.json')['proxy_after'],self.before)
+        self.process.terminate.assert_called_once()
+
+    def test_managed_exit_failure_requests_manual_close_and_waits(self):
+        app=self.managed_app()
+        app.request_close.side_effect=[None,EzMcdError('sampling_managed_app_process_changed')]
+        self.run_capture()
+        stages=[c.args[0]['stage'] for c in self.capture.report.call_args_list]
+        self.assertIn('APP_MANUAL_CLOSE_REQUIRED',stages)
+        self.assertLess(stages.index('APP_MANUAL_CLOSE_REQUIRED'),stages.index('CLEANUP_RESULT'))
+        self.assertEqual(app.request_close.call_count,2)
+
+    def test_delayed_launch_remains_guarded_until_app_and_launcher_both_end(self):
+        app=self.managed_app();clock=[0];pending=[False];ticks=[0]
+        app.start.side_effect=lambda:pending.__setitem__(0,True)
+        app.launch_pending.side_effect=lambda:pending[0]
+        def close():
+            if self.running:self.running=False;pending[0]=False
+        app.request_close.side_effect=close
+        def tick(_):
+            ticks[0]+=1
+            if ticks[0]==1:clock[0]=121
+            elif ticks[0]==2:self.running=True
+        with patch('ezmcd.sampling.time.time',side_effect=lambda:clock[0]),patch('ezmcd.sampling.time.sleep',side_effect=tick):
+            self.run_capture()
+        self.assertGreaterEqual(app.request_close.call_count,3)
+        self.assertFalse(pending[0]);self.assertFalse(self.running)
+        self.assertFalse(read_private(self.capture.directory/'cleanup.json')['app_launch_pending'])
+
+    def test_guard_failure_during_launch_waits_before_restoring_proxy(self):
+        app=self.managed_app();pending=[False]
+        def start():pending[0]=True;self.process.poll.return_value=1
+        app.start.side_effect=start;app.launch_pending.side_effect=lambda:pending[0]
+        def close():
+            if self.running:self.running=False;pending[0]=False
+        app.request_close.side_effect=close
+        def tick(_):
+            if pending[0]:self.running=True
+        with patch('ezmcd.sampling.time.sleep',side_effect=tick):
+            with self.assertRaisesRegex(EzMcdError,'listener_failed'):self.run_capture()
+        self.assertFalse(pending[0]);self.assertFalse(self.running)
+        self.assertEqual(read_private(self.capture.directory/'cleanup.json')['proxy_after'],self.before)
+
     def test_waits_for_app_close_then_restores_proxy_and_retains_certificate(self):
         result=self.run_capture()
         cleanup=read_private(self.capture.directory/'cleanup.json')
@@ -127,7 +219,7 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(read_private(self.capture.directory/'cleanup.json')['cleanup_errors'],['proxy_verification'])
 
     def test_invalid_capture_duration_and_service_are_rejected(self):
-        for options in ({'seconds':121},{'seconds':True},{'seconds':0},{'service':'-all'}, {'service':'Wi-Fi\n'}):
+        for options in ({'seconds':121},{'seconds':True},{'seconds':0},{'service':'-all'}, {'service':'Wi-Fi\n'}, {'manage_app':1}):
             with self.assertRaisesRegex(EzMcdError,'sampling_options_invalid'):
                 RuntimeCapture(SimpleNamespace(root=self.root),'synthetic',**options)
 
