@@ -7,6 +7,8 @@ ezmcd account check personal
 ezmcd account refresh personal
 ```
 
+本机 [受保护采样](guarded-capture.md#采样期间的会话刷新) 也可保存一次已允许的官方刷新响应中的凭据，前提是与本人签名余额样本匹配。导入只做GET核验，不会再次刷新；是否采到令牌单独返回，不能把会话可用当作刷新令牌已经兑换成功。该新增采样分支的真实刷新联调仍待验收。
+
 个人 Agent 调用 `account_refresh(account)`。它会变更认证状态，因此工具没有标注为只读。该操作不创建订单、不付款、不增加消费额度。
 
 刷新协议来自已支持官方客户端：`POST /bff/passport/login/session/refresh`，使用当前会话签名。成功返回的新凭据先保存到本机私有文件，再通过钱包只读接口验证；通过后原子提交新会话，保留会员身份、消费策略和购买日志。

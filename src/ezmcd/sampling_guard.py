@@ -15,6 +15,7 @@ from ezmcd.accounts import profile_from_balance_sample, runtime_from_sample
 from ezmcd.models import fingerprint
 from ezmcd.errors import EzMcdError
 from ezmcd.storage import write_private
+from ezmcd.sampling_session import valid_credential, validate_session
 
 BALANCE = '/bff/member/mwallet/balance'
 ORDER = '/bff/order/orders'
@@ -50,6 +51,8 @@ class RuntimeGuard:
         self.profile = None
         self.refresh_session = config.get('refresh_session')
         self.refresh_used = False
+        self.refresh_flow = None
+        self.session_candidate = None
         self.runtime_saved = False
         self.audit = {'blocked_requests':0, 'allowed_gets':0, 'balance_saved':False,
                       'runtime_saved':False, 'upstream_connections':0, 'last_result':'starting'}
@@ -105,6 +108,7 @@ class RuntimeGuard:
                     self.refresh_used=True
                     self.audit['allowed_session_refreshes']=1
                     self.save_audit()
+                    self.refresh_flow=flow
                     flow.response=None
                     flow.metadata.pop('ezmcd_blocked',None)
                     return
@@ -160,7 +164,7 @@ class RuntimeGuard:
     def responseheaders(self, flow):
         self.audit['response_header_events'] = self.audit.get('response_header_events',0)+1
         if flow.metadata.get('ezmcd_blocked') or (
-                flow.request.host == 'api.mcd.cn' and flow.request.path == BALANCE):
+                flow.request.host == 'api.mcd.cn' and flow.request.path in (BALANCE, REFRESH)):
             flow.response.stream = False
         self.save_audit()
 
@@ -170,13 +174,37 @@ class RuntimeGuard:
 
     def response(self, flow):
         req = flow.request
-        if (req.host == 'api.mcd.cn' and req.path == REFRESH and req.method == 'POST'
-                and not flow.metadata.get('ezmcd_blocked')):
+        if flow is self.refresh_flow:
+            # Only the exact flow claimed before forwarding is eligible. Never
+            # turn this response hook into a second refresh request or a retry.
+            self.refresh_flow = None
             try:
+                if (self.clock() > self.deadline or flow.metadata.get('ezmcd_blocked')
+                        or (req.scheme,req.host,req.port,req.method,req.path) != ('https','api.mcd.cn',443,'POST',REFRESH)
+                        or fingerprint(self.headers(req, {'sid','token'})) != self.refresh_session
+                        or flow.response.status_code != 200 or len(flow.response.content or b'') > 65536):
+                    raise ValueError('invalid_refresh_response')
                 payload=json.loads(flow.response.content)
-                self.audit['refresh_succeeded']=(flow.response.status_code==200 and payload.get('success') is True)
-            except (ValueError,TypeError,AttributeError):
+                if not isinstance(payload,dict) or payload.get('success') is not True:
+                    raise ValueError('invalid_refresh_response')
+                self.audit['refresh_succeeded'] = True
+                data = payload.get('data')
+                if (not isinstance(data,dict) or data.get('securityContext') or data.get('needVerify')
+                        or str(payload.get('code')) in ('420','707053')
+                        or not all(valid_credential(data.get(k)) for k in ('sid','refreshToken'))
+                        or ('meddyId' in data and fingerprint({'provider':'mcd-cn','member':data['meddyId']}) != self.identity)):
+                    raise ValueError('invalid_refresh_response')
+                # Drop every response field except the credentials and binding.
+                self.session_candidate = {'schema_version':1, 'identity':self.identity,
+                    'source_session':self.refresh_session,
+                    'target_session':fingerprint({'sid':data['sid'],'token':req.headers['token']}),
+                    'fields':{k:data[k] for k in ('sid','refreshToken')}}
+                self.audit['session_result'] = 'waiting_for_matching_balance'
+                self.save_session()
+            except (ValueError,TypeError,AttributeError,KeyError,EzMcdError,OSError):
                 self.audit['refresh_succeeded']=False
+                self.audit['session_result']='refresh_response_rejected'
+                self.session_candidate=None
             self.save_audit()
             return
         if (self.profile is not None or self.clock()>self.deadline or flow.metadata.get('ezmcd_blocked')
@@ -215,4 +243,22 @@ class RuntimeGuard:
                    'invalid_official_sample_signature','official_client_build_not_supported',
                    'wrong_member','invalid_headers','balance_not_successful','balance_response_invalid'}
             self.audit['balance_error'] = str(error) if str(error) in known else type(error).__name__
+        self.save_audit()
+        self.save_session()
+
+    def save_session(self):
+        if self.session_candidate is None or self.profile is None or self.clock() > self.deadline:
+            return
+        candidate, self.session_candidate = self.session_candidate, None
+        try:
+            validate_session(candidate, self.profile,
+                {'identity':self.identity, 'refresh_session':self.refresh_session},
+                self.audit | {'session_saved':True})
+            write_private(self.output/'session.json', candidate)
+            self.audit['session_saved'] = True
+            self.audit['session_result'] = 'saved_observed_not_redeemed'
+        except EzMcdError:
+            self.audit['session_result'] = 'balance_session_mismatch'
+        except OSError:
+            self.audit['session_result'] = 'session_storage_failed'
         self.save_audit()

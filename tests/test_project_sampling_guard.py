@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 import tempfile
 import time
@@ -9,6 +10,7 @@ from urllib.parse import urlsplit
 from ezmcd.sampling_guard import RuntimeGuard, BALANCE, ORDER, REFRESH
 from ezmcd.models import fingerprint
 from ezmcd.protocol.v5 import ObservedRuntime, encode
+from ezmcd.protocol.signing import sign_v4
 from test_project_accounts import sample, KEYS
 
 
@@ -55,8 +57,12 @@ class GuardTests(unittest.TestCase):
     def flow(self, method, path, headers=None):
         return flow_for(method,'https://api.mcd.cn'+path,headers)
 
-    def balance(self):
+    def balance(self, **overrides):
         evidence=sample()
+        if overrides:
+            headers=evidence['request']['headers']
+            headers.update(overrides)
+            headers.update(sign_v4(headers,*KEYS[:2],datetime.now(timezone.utc),'GET',BALANCE))
         flow=self.flow('GET',BALANCE,evidence['request']['headers'])
         self.guard.requestheaders(flow); self.assertIsNone(flow.response)
         flow.response=http.Response.make(200,evidence['response']['body'].encode(),{'content-type':'application/json'})
@@ -194,6 +200,116 @@ class GuardTests(unittest.TestCase):
             flow.response.stream=True
             self.guard.responseheaders(flow)
             self.assertFalse(flow.response.stream)
+
+    def refresh(self, *, data=None, token='synthetic-device'):
+        headers={'sid':'synthetic-old-session','token':token}
+        self.guard.refresh_session=fingerprint(headers)
+        flow=self.flow('POST',REFRESH,headers)
+        self.guard.requestheaders(flow)
+        self.assertIsNone(flow.response)
+        payload={'success':True,'data':data if data is not None else {
+            'sid':'synthetic-session','refreshToken':'synthetic-new-refresh','meddyId':'synthetic-member',
+            'phone':'must-not-save-phone','cookie':'must-not-save-cookie'}}
+        flow.response=http.Response.make(200,json.dumps(payload).encode())
+        return flow
+
+    def test_refresh_credentials_wait_for_signed_balance_and_are_minimal(self):
+        flow=self.refresh()
+        self.guard.responseheaders(flow)
+        self.assertFalse(flow.response.stream)
+        self.guard.response(flow)
+        self.assertFalse((self.directory/'session.json').exists())
+        self.balance()
+        path=self.directory/'session.json'
+        saved=json.loads(path.read_text())
+        self.assertEqual(saved['fields'],{'sid':'synthetic-session','refreshToken':'synthetic-new-refresh'})
+        self.assertEqual(path.stat().st_mode&0o777,0o600)
+        self.assertTrue(self.guard.audit['session_saved'])
+        self.assertIsNone(self.guard.session_candidate)
+        for value in ('must-not-save','synthetic-old-session','synthetic-device','synthetic-member'):
+            self.assertNotIn(value,json.dumps(saved))
+        self.assertNotIn('synthetic-',json.dumps(self.guard.audit))
+        # Neither a duplicate callback nor a second request can rotate again.
+        self.guard.response(flow)
+        again=self.flow('POST',REFRESH,flow.request.headers)
+        self.guard.requestheaders(again)
+        self.assertTrue(again.killed)
+        self.assertEqual(self.guard.audit['allowed_session_refreshes'],1)
+
+    def test_balance_response_may_arrive_before_refresh_response(self):
+        flow=self.refresh()
+        self.balance()
+        self.guard.response(flow)
+        self.assertTrue(self.guard.audit['session_saved'])
+
+    def test_refresh_matches_rotated_sid_not_source_sid(self):
+        flow=self.refresh(data={'sid':'synthetic-rotated','refreshToken':'new-token'})
+        self.guard.response(flow)
+        self.balance(sid='synthetic-rotated')
+        self.assertTrue(self.guard.audit['session_saved'])
+
+    def test_refresh_mismatched_device_or_session_never_persists_token(self):
+        for key,value in (('token','other-device'),('sid','other-session')):
+            with self.subTest(key=key):
+                self.guard=RuntimeGuard(self.config,clock=lambda:self.now)
+                flow=self.refresh()
+                self.guard.response(flow)
+                self.balance(**{key:value})
+                self.assertEqual(self.guard.audit['session_result'],'balance_session_mismatch')
+                self.assertFalse((self.directory/'session.json').exists())
+                self.assertIsNone(self.guard.session_candidate)
+
+    def test_refresh_never_accepts_unsolicited_response(self):
+        flow=self.flow('POST',REFRESH,{'sid':'synthetic-session','token':'synthetic-device'})
+        flow.response=http.Response.make(200,b'{"success":true,"data":{"sid":"x","refreshToken":"y"}}')
+        self.guard.response(flow)
+        self.balance()
+        self.assertFalse((self.directory/'session.json').exists())
+        self.assertNotIn('refresh_succeeded',self.guard.audit)
+
+    def test_invalid_refresh_response_discarded_without_credential_diagnostics(self):
+        for case in ('oversize','bad_json','list','status','expired','wrong_host','blocked','changed_headers',
+                     'wrong_member','empty_token','control','delete','long','missing_sid','challenge','risk'):
+            with self.subTest(case=case):
+                self.guard=RuntimeGuard(self.config,clock=lambda:self.now)
+                flow=self.refresh()
+                payload=json.loads(flow.response.content)
+                if case=='oversize': flow.response.content=b' '*65537
+                elif case=='bad_json': flow.response.content=b'not-json'
+                elif case=='list': flow.response.content=b'[]'
+                elif case=='status': flow.response.status_code=500
+                elif case=='expired': self.guard.deadline=self.now-1
+                elif case=='wrong_host': flow.request.host='other.example'
+                elif case=='blocked': flow.metadata['ezmcd_blocked']=True
+                elif case=='changed_headers': flow.request.headers['token']='other-device'
+                else:
+                    if case=='wrong_member': payload['data']['meddyId']='other-member'
+                    if case=='empty_token': payload['data']['refreshToken']=''
+                    if case=='control': payload['data']['refreshToken']='secret\nvalue'
+                    if case=='delete': payload['data']['refreshToken']='secret\x7fvalue'
+                    if case=='long': payload['data']['refreshToken']='a'*16385
+                    if case=='missing_sid': payload['data'].pop('sid')
+                    if case=='challenge': payload['data']['needVerify']=True
+                    if case=='risk': payload['code']='707053'
+                    flow.response.content=json.dumps(payload).encode()
+                self.guard.response(flow)
+                self.assertFalse((self.directory/'session.json').exists())
+                self.assertIsNone(self.guard.session_candidate)
+                self.assertNotIn('synthetic-',json.dumps(self.guard.audit))
+
+    def test_failed_session_storage_keeps_guard_blocking(self):
+        flow=self.refresh()
+        self.balance()
+        from ezmcd.storage import write_private
+        def write(path,data):
+            if path.name=='session.json': raise OSError('synthetic-token must not appear')
+            return write_private(path,data)
+        with patch('ezmcd.sampling_guard.write_private',side_effect=write):
+            self.guard.response(flow)
+        self.assertEqual(self.guard.audit['session_result'],'session_storage_failed')
+        order=self.runtime(); self.guard.requestheaders(order)
+        self.assertTrue(order.killed)
+        self.assertNotIn('synthetic-token',json.dumps(self.guard.audit))
 
 
 if __name__=='__main__':unittest.main()

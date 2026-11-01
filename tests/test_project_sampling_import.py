@@ -318,6 +318,122 @@ class CaptureImportTests(unittest.TestCase):
         self.assertEqual(before, self.account_bytes())
         self.assertEqual(self.wallet.call_count, 1)
 
+    def add_session(self):
+        source=fingerprint({'sid':'synthetic-old-session','token':'synthetic-device'})
+        headers=read_private(self.directory/'balance.json')['request']['headers']
+        self.edit('config',lambda x:x.update(refresh_session=source))
+        self.edit('audit',lambda x:x.update(allowed_session_refreshes=1,refresh_succeeded=True,session_saved=True))
+        write_private(self.directory/'session.json',{'schema_version':1,
+            'identity':self.store.account('mine')['identity'],'source_session':source,
+            'target_session':fingerprint({k:headers[k] for k in ('sid','token')}),
+            'fields':{'sid':headers['sid'],'refreshToken':'synthetic-captured-refresh'}})
+
+    def test_captured_refresh_commits_with_new_session_and_repeats_readonly(self):
+        self.make_capture(session='synthetic-new-session')
+        self.add_session()
+        with patch('ezmcd.transport.Transport.send',side_effect=AssertionError('No refresh POST')):
+            result=import_capture(self.store,'mine',self.directory)
+            self.assertTrue(result['refresh_token_captured'])
+            self.assertFalse(result['refresh_token_redemption_tested'])
+            current=self.store.account('mine')
+            self.assertEqual(current['profile']['fields']['refreshToken'],'synthetic-captured-refresh')
+            self.assertTrue(current['policy']['allow_checkout'])
+            before=self.account_bytes()
+            again=import_capture(Store(self.store.root),'mine',self.directory)
+        self.assertTrue(again['already_imported'])
+        self.assertEqual(before,self.account_bytes())
+        self.assertNotIn('synthetic-captured-refresh',json.dumps(result))
+        self.assertEqual(self.wallet.call_count,2)
+        self.assertEqual(self.verify.call_count,2)
+
+    def test_captured_refresh_failure_does_not_partially_replace_account(self):
+        self.make_capture(session='synthetic-new-session')
+        self.add_session()
+        before=self.account_bytes()
+        self.verify.return_value={'http_status':401,'response':{'success':False}}
+        with self.assertRaises(EzMcdError): import_capture(self.store,'mine',self.directory)
+        self.assertEqual(before,self.account_bytes())
+
+    def test_missing_or_invalid_session_rejected_before_network(self):
+        changes=(('session',lambda x:x.update(identity='other-member')),
+            ('session',lambda x:x.update(schema_version=True)),
+            ('session',lambda x:x.update(source_session='wrong-source')),
+            ('session',lambda x:x.update(target_session='wrong-device')),
+            ('session',lambda x:x['fields'].update(sid='wrong-session')),
+            ('session',lambda x:x['fields'].update(refreshToken='bad\nvalue')),
+            ('session',lambda x:x['fields'].update(refreshToken=None)),
+            ('session',lambda x:x.update(cookie='must-not-save')),
+            ('config',lambda x:x.pop('refresh_session')),
+            ('audit',lambda x:x.update(session_saved=False)),
+            ('audit',lambda x:x.update(refresh_succeeded=False)),
+            ('audit',lambda x:x.update(allowed_session_refreshes=2)))
+        before=self.account_bytes()
+        for name,change in changes:
+            with self.subTest(name=name,change=change):
+                self.make_capture();self.add_session();self.edit(name,change)
+                with self.assertRaisesRegex(EzMcdError,'sampling_session_evidence_invalid'):
+                    import_capture(self.store,'mine',self.directory)
+        self.make_capture();self.add_session()
+        (self.directory/'session.json').unlink()
+        with self.assertRaisesRegex(EzMcdError,'sampling_session_evidence_invalid'):
+            import_capture(self.store,'mine',self.directory)
+        self.assertEqual(before,self.account_bytes())
+        self.wallet.assert_not_called();self.verify.assert_not_called()
+
+    def test_changed_refresh_evidence_cannot_overwrite_successful_import(self):
+        self.add_session()
+        import_capture(self.store,'mine',self.directory)
+        before=self.account_bytes()
+        self.edit('session',lambda x:x['fields'].update(refreshToken='synthetic-substituted'))
+        with self.assertRaisesRegex(EzMcdError,'sampling_account_changed'):
+            import_capture(self.store,'mine',self.directory)
+        self.assertEqual(before,self.account_bytes())
+        self.assertEqual(self.wallet.call_count,1)
+
+    def test_session_file_permissions_and_symlink_rejected(self):
+        self.add_session()
+        path=self.directory/'session.json'
+        path.chmod(0o644)
+        with self.assertRaisesRegex(EzMcdError,'private_file_permissions_required'):
+            import_capture(self.store,'mine',self.directory)
+        path.unlink();path.symlink_to(self.directory/'missing.json')
+        with self.assertRaises(EzMcdError): import_capture(self.store,'mine',self.directory)
+        self.wallet.assert_not_called();self.verify.assert_not_called()
+
+    def test_session_absent_preserves_legacy_receipt_fingerprint(self):
+        files={k:read_private(self.directory/(k+'.json')) for k in ('balance','runtime')}
+        result=import_capture(self.store,'mine',self.directory)
+        self.assertFalse(result['refresh_token_captured'])
+        self.assertEqual(self.store.account('mine')['sampling_import']['evidence_fingerprint'],fingerprint(files))
+
+    def test_guard_generated_session_imports_without_rotating_token(self):
+        from test_project_sampling_guard import flow_for, http
+        from ezmcd.sampling_guard import RuntimeGuard, BALANCE, REFRESH
+        from types import SimpleNamespace
+        source={'sid':'synthetic-old-session','token':'synthetic-device'}
+        self.edit('config',lambda x:x.update(refresh_session=fingerprint(source),deadline=time.time()+120))
+        config=read_private(self.directory/'config.json')
+        guard=RuntimeGuard(config)
+        with patch.dict('sys.modules',{'mitmproxy':SimpleNamespace(http=http)}):
+            refresh=flow_for('POST','https://api.mcd.cn'+REFRESH,source)
+            guard.requestheaders(refresh)
+            refresh.response=http.Response.make(200,b'{"success":true,"data":{"sid":"synthetic-session","refreshToken":"synthetic-official-refresh"}}')
+            guard.response(refresh)
+            balance=read_private(self.directory/'balance.json')
+            flow=flow_for('GET','https://api.mcd.cn'+BALANCE,balance['request']['headers'])
+            guard.requestheaders(flow)
+            flow.response=http.Response.make(200,b'{"success":true}')
+            guard.response(flow)
+            runtime=read_private(self.directory/'runtime.json')['request']
+            probe=flow_for('POST','https://api.mcd.cn'+runtime['path'])
+            guard.requestheaders(probe)
+            order=flow_for('POST','https://api.mcd.cn'+runtime['path'],runtime['headers'])
+            guard.requestheaders(order)
+            self.assertTrue(order.killed)
+        with patch('ezmcd.transport.Transport.send',side_effect=AssertionError('No rotation')):
+            self.assertTrue(import_capture(self.store,'mine',self.directory)['refresh_token_captured'])
+        self.assertEqual(self.store.account('mine')['profile']['fields']['refreshToken'],'synthetic-official-refresh')
+
 
 if __name__ == '__main__':
     unittest.main()

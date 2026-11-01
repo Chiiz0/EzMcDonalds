@@ -15,6 +15,7 @@ from .provider import McdProvider
 from .runtime_recovery import fresh_evidence
 from .storage import read_private
 from .transport import Transport
+from .sampling_session import validate_session
 
 
 def credential_fingerprint(record):
@@ -55,6 +56,11 @@ def _capture_files(store, directory):
     if (cleanup.get("official_app_closed") is not True or cleanup.get("cleanup_errors") != []
             or not isinstance(before, dict) or before.get("Enabled") != "No" or before != after):
         raise EzMcdError("sampling_cleanup_needs_attention")
+    session_path = directory / "session.json"
+    if session_path.exists() or session_path.is_symlink():
+        files["session"] = read_private(session_path)
+    elif audit.get("session_saved") is True:
+        raise EzMcdError("sampling_session_evidence_invalid")
     return directory, files
 
 
@@ -66,7 +72,7 @@ def import_capture(store, alias, directory):
         raise EzMcdError("active_official_account_required_for_runtime_update")
     if config.get("identity") != account["identity"] or config.get("binary") != account["binary"]:
         raise EzMcdError("sampling_member_mismatch")
-    evidence = fingerprint({k: files[k] for k in ("balance", "runtime")})
+    evidence = fingerprint({k: files[k] for k in ("balance", "runtime", "session") if k in files})
     receipt = {"capture_id": directory.name, "evidence_fingerprint": evidence}
     previous = account.get("sampling_import", {})
     repeated = (all(previous.get(k) == v for k, v in receipt.items())
@@ -78,6 +84,8 @@ def import_capture(store, alias, directory):
     if fingerprint({"provider": "mcd-cn", "member": profile["fields"]["meddyId"]}) != account["identity"]:
         raise EzMcdError("sampling_member_mismatch")
     runtime_from_sample(profile, files["runtime"], account["binary"])
+    if "session" in files:
+        profile["fields"]["refreshToken"] = validate_session(files["session"], profile, config, files["audit"])
     if repeated:
         with store.lock(account["identity"]):
             if fingerprint(store.account(alias)) != fingerprint(account):
@@ -95,4 +103,5 @@ def import_capture(store, alias, directory):
         "observation_time_preserved": True, "policy_preserved": True, "journal_preserved": True,
         "order_created": False, "payment_attempted": False, "cart_changed": False,
         "order_post_acceptance_verified": False, "cross_day_validity_verified": False,
+        "refresh_token_captured": "session" in files, "refresh_token_redemption_tested": False,
         "next_action": "凭据已核验。让 Agent 检查账号、原订单与购物车后继续选餐；本次未授权消费。"}
