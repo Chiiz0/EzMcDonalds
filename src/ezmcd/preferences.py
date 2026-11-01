@@ -453,6 +453,7 @@ def plan_meal(service, account=None, date=None):
                                   variant_of=variant_of)
         selections.append(selection.model_dump(exclude_none=True))
         descriptions.append({"name": offer["name"], "card_name": offer.get("card_name"), "coupon_name": preference.coupon_name,
+                             **({"promotion_handling": detail["promotion_handling"]} if detail.get("promotion_handling") else {}),
                              "variant_of": preference.variant_of,
                              **({"variant_specifications": preference.variant_specifications} if preference.variant_specifications else {}),
                              "quantity": preference.quantity, "components": preference.component_names,

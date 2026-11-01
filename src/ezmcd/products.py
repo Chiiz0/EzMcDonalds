@@ -7,6 +7,7 @@ from .errors import EzMcdError
 from .models import yuan, canonical
 from .modifiers import public_modifiers, selected_modification, verify_modification, configuration_signature
 from .coupons import coupon_fields, verify_coupon_cart, coupon_signature
+from .promotions import ordinary_offer_with_unavailable_related_promotion
 
 
 def choose_offer(menu, product_code, offer_id=None):
@@ -136,9 +137,10 @@ def verify_cart_contents(draft, cart):
         raise EzMcdError("cart_contents_do_not_match_requested_items") from None
 
 
-def requires_official_promotion(offer):
+def requires_official_promotion(offer, detail=None):
     return bool(not offer.get("cardId") and not offer.get("_coupon_source")
-                and (offer.get("couponId") or offer.get("productPromotions")))
+                and (offer.get("couponId") or offer.get("couponCode") or offer.get("promotionId") or offer.get("productPromotions"))
+                and not ordinary_offer_with_unavailable_related_promotion(offer, detail))
 
 
 def public_detail(detail, offer):
@@ -157,8 +159,10 @@ def public_detail(detail, offer):
                 "standard_configuration_supported": configurable(p), "modifiers": public_modifiers(p)} for p in group.get("comboProducts", [])]})
     return {"product_code": product["code"], "name": product["name"], "product_type": product["type"],
         "offer_id": offer["offer_id"], "card_name": offer.get("cardName"), "groups": groups,
-        "modifiers": public_modifiers(product), "standard_configuration_supported": str(product.get("type")) in ("1", "7") and configurable(product) and not requires_official_promotion(offer),
-        "configuration_issues": ["promotion_configuration_requires_official_cart"] if requires_official_promotion(offer) else [],
+        "modifiers": public_modifiers(product), "standard_configuration_supported": str(product.get("type")) in ("1", "7") and configurable(product) and not requires_official_promotion(offer, detail),
+        "configuration_issues": ["promotion_configuration_requires_official_cart"] if requires_official_promotion(offer, detail) else [],
+        "promotion_handling": ("ordinary_price_only_related_member_offer_unavailable"
+            if ordinary_offer_with_unavailable_related_promotion(offer, detail) else None),
         "variants": [{"product_code": p.get("code"), "name": p.get("name"), "product_type": p.get("type"),
             "specification_code": p.get("matchedSpecsCode"), "available": p.get("unsellable") is False,
             "display_price_cny": yuan(p["price"]) if type(p.get("price")) is int and p["price"] >= 0 else None}
@@ -192,7 +196,7 @@ def configured_product(selection, offer, detail, sequence):
             result[field] = offer[field]
     elif offer.get("_coupon_source"):
         result.update(coupon_fields(offer, selection.quantity))
-    elif requires_official_promotion(offer):
+    elif requires_official_promotion(offer, detail):
         raise EzMcdError("promotion_configuration_requires_official_cart")
     groups = product.get("comboItems", [])
     selected = {s.round: s for s in selection.combo}
