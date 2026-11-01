@@ -96,8 +96,16 @@ class ItemSelection(BaseModel):
     quantity: int = Field(default=1, ge=1, le=20)
     offer_id: str | None = None
     coupon_ref: str | None = Field(default=None, pattern=r"^coupon-[0-9a-f]{24}$")
+    # Omit the new unset field so pre-a19 cart intent digests stay identical.
+    variant_of: str | None = Field(default=None, pattern=r"^[A-Za-z0-9]{1,20}$", exclude_if=lambda v: v is None)
     combo: list[ComboSelection] = Field(default_factory=list, max_length=20)
     modifiers: list[ModifierSelection] | None = Field(default=None, max_length=20)
+
+    @model_validator(mode="after")
+    def variant_source(self):
+        if self.variant_of and (not self.offer_id or self.coupon_ref or self.variant_of == self.product_code):
+            raise ValueError("A variant requires its distinct parent and regular menu offer, without coupon_ref")
+        return self
 
 
 class CheckoutInput(BaseModel):

@@ -91,17 +91,19 @@ class DemoProvider:
             "products": [{"product_code": "100001", "name": "演示汉堡", "offer_id": "demo-offer", "product_type": 1,
             "display_price_cny": "10.00", "requires_configuration": False, "display_price_is_final_quote": False}]}
 
-    def product_detail(self, args, product_code, offer_id=None, coupon_ref=None):
+    def product_detail(self, args, product_code, offer_id=None, coupon_ref=None, variant_of=None):
         self.store(args.store_code)
         if coupon_ref is not None:
             raise EzMcdError("demo_has_no_coupons")
+        if variant_of is not None:
+            raise EzMcdError("demo_has_no_variant_parent")
         if product_code != "100001":
             raise EzMcdError("demo_product_not_found")
         return {"simulation": True, "product_code": "100001", "name": "演示汉堡", "offer_id": "demo-offer",
                 "product_type": 1, "groups": [], "max_quantity": 20, "display_price_is_final_quote": False}
 
     def configured_cart_draft(self, args, selections):
-        if any(s.combo or s.modifiers or s.coupon_ref for s in selections):
+        if any(s.combo or s.modifiers or s.coupon_ref or s.variant_of for s in selections):
             raise EzMcdError("demo_has_no_combo_choices")
         return self.simple_cart_draft(args, selections)
 
@@ -165,6 +167,8 @@ class DemoProvider:
         return self.write_cart({"quantity": 0})
 
     def simple_cart_draft(self, args, selections):
+        if any(s.variant_of for s in selections):
+            raise EzMcdError("demo_has_no_variant_parent")
         if any(s.coupon_ref for s in selections):
             raise EzMcdError("demo_has_no_coupons")
         if len(selections) != 1 or selections[0].product_code != "100001":

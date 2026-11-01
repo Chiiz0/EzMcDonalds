@@ -41,6 +41,7 @@ class PreferredComponentModifiers(BaseModel):
 class PreferredItem(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=120)
+    variant_of: str | None = Field(default=None, min_length=1, max_length=120)
     coupon_name: str | None = Field(default=None, min_length=1, max_length=120)
     quantity: int = Field(default=1, ge=1, le=20)
     component_names: list[str] = Field(default_factory=list, max_length=20)
@@ -250,7 +251,29 @@ def plan_meal(service, account=None, date=None):
     selections, descriptions, issues, estimate = [], [], [], 0
     for preference in preferences.items:
         coupon_ref = None
-        if preference.coupon_name:
+        variant_of = None
+        if preference.variant_of:
+            if preference.coupon_name or preferences.require_card_discount:
+                issues.append({"reason": "preferred_variant_requires_regular_parent_offer", "name": preference.name})
+                continue
+            if menu is None:
+                menu = provider.menu(request)["products"]
+            parents = {p["offer_id"]: p for p in menu if p["name"] == preference.variant_of
+                       and str(p.get("product_type")) == "3" and not p.get("card_name")}
+            if len(parents) != 1:
+                issues.append({"reason": "preferred_variant_parent_unavailable_or_ambiguous", "name": preference.variant_of})
+                continue
+            parent = next(iter(parents.values()))
+            parent_detail = provider.product_detail(request, parent["product_code"], parent["offer_id"])
+            variants = [v for v in parent_detail["variants"] if v["name"] == preference.name and v.get("parent_detail_selection")]
+            if len(variants) != 1:
+                issues.append({"reason": "preferred_variant_unavailable_or_unsupported", "name": preference.name,
+                               "variants": parent_detail["variants"]})
+                continue
+            variant = variants[0]
+            variant_of = variant["parent_detail_selection"]["variant_of"]
+            offers = [variant | {"offer_id": variant["parent_detail_selection"]["offer_id"], "card_name": None}]
+        elif preference.coupon_name:
             if preferences.require_card_discount:
                 issues.append({"reason": "explicit_coupon_conflicts_with_required_card_discount", "name": preference.name})
                 continue
@@ -279,7 +302,8 @@ def plan_meal(service, account=None, date=None):
             issues.append({"reason": "offer_price_unknown_choose_explicitly", "name": preference.name, "offers": offers})
             continue
         offer = min(offers, key=lambda p: (cents(p["display_price_cny"]) if p.get("display_price_cny") else 0, p["offer_id"]))
-        detail = (provider.product_detail(request, offer["product_code"], offer["offer_id"], coupon_ref) if coupon_ref else
+        detail = (provider.product_detail(request, offer["product_code"], offer["offer_id"], variant_of=variant_of) if variant_of else
+                  provider.product_detail(request, offer["product_code"], offer["offer_id"], coupon_ref) if coupon_ref else
                   provider.product_detail(request, offer["product_code"], offer["offer_id"]))
         groups, extra, problems = choose_components(detail, preference.component_names)
         modifiers, modifier_problems = apply_preferred_modifiers(detail, preference, groups)
@@ -291,9 +315,11 @@ def plan_meal(service, account=None, date=None):
                            "details": problems, "max_quantity": detail.get("max_quantity")})
             continue
         selection = ItemSelection(product_code=offer["product_code"], offer_id=offer["offer_id"],
-                                  quantity=preference.quantity, combo=groups, modifiers=modifiers, coupon_ref=coupon_ref)
+                                  quantity=preference.quantity, combo=groups, modifiers=modifiers, coupon_ref=coupon_ref,
+                                  variant_of=variant_of)
         selections.append(selection.model_dump(exclude_none=True))
         descriptions.append({"name": offer["name"], "card_name": offer.get("card_name"), "coupon_name": preference.coupon_name,
+                             "variant_of": preference.variant_of,
                              "quantity": preference.quantity, "components": preference.component_names,
                              "modifiers": [m.model_dump(exclude_none=True) for m in preference.modifiers],
                              "component_modifiers": [m.model_dump(exclude_none=True) for m in preference.component_modifiers]})

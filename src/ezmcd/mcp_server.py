@@ -45,6 +45,7 @@ def build_server(service):
         "After cart addition, only MATCHED suggests a fresh quote. On a lost reply or restart use cart_add_status; never switch keys to repeat an unresolved addition. "
         "Use cart_operations_list to find unresolved local cart intents. If the user abandons a meal whose pickup time has passed, cart_operation_retire closes only that local intent, retains its write claim and leaves official carts and purchases untouched. Inspect the new meal's cart before continuing; never treat retirement as cancellation or proof of failure. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
+        "For variants absent from the menu, use product_detail's validated parent_detail_selection and preserve variant_of plus the parent offer_id in cart_add_configured. Related offers are not selected automatically; parent card/coupon identifiers are never borrowed. "
         "Use a stable idempotency key per user purchase. "
         "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
         "After any ambiguous result query order_status; never create a replacement to retry payment. "
@@ -61,9 +62,10 @@ def build_server(service):
             "stores": "city/name search or explicit coordinates, favorites, live pickup slots; available locker or counter pickup required",
             "pickup_methods": "read initial confirmation methods for a nonempty cart; report selected/available/supported separately; never change fulfillment or infer locker support from store tags",
             "pickup_quote": "explicit one-shot method switch, persisted response and 120-second selected quote; submit rechecks unchanged cart/prices using GETs without repeating the switch; no fallback to default fulfillment",
-            "meal_preferences": "local saved products, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
+            "meal_preferences": "local saved products, named parent variants, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
             "membership_assets": "card validity and coupon category counts; coupons_list queries current store/time availability and coupon_products lists matching products",
-            "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
+            "products": "ordinary items and combos; variants follow their own live menu offers or an explicit validated regular-parent detail selection; variant_of preserves the source, parent card/coupon offers are never transferred",
+            "variant_evidence": "large hot milk absent from menu passed real parent-detail selection, single add, CNY23.00 quote, CNY20.00 limit rejection, restart replay and clear; no payment or automatic selection of related promotions",
             "ordinary_cart_evidence": "two hash browns, and a hash brown plus fried dough stick: real CNY17.00 quotes; another store's counter pickup passed explicit switch, CNY8.50 quote, process restart and clear; no new payment",
             "order_components": "verified against each parent product and quantity before payment; swapping components across distinct meal rows is rejected",
             "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
@@ -229,10 +231,12 @@ def build_server(service):
 
     @server.tool(annotations=READ)
     @protected
-    def product_detail(request: CheckoutInput, product_code: str, offer_id: str | None = None, coupon_ref: str | None = None) -> dict:
-        """Read live combo rounds, components, prices, free keep/remove modifiers and specification variants. Follow a variant's live menu_offers to its detail; modifiers use codes, not arbitrary request blobs. No cart/order mutation."""
+    def product_detail(request: CheckoutInput, product_code: str, offer_id: str | None = None, coupon_ref: str | None = None,
+                       variant_of: str | None = None) -> dict:
+        """Read live combo rounds, components, prices, free modifiers and variants. Follow a variant's live menu_offers, or its explicit parent_detail_selection for a regular parent variant. Keep variant_of and parent offer_id when adding that variant. Parent cards/coupons are never borrowed; related offers are not added automatically. No cart/order mutation."""
         _, provider = service.provider(request.account)
-        return provider.product_detail(request, product_code, offer_id, coupon_ref)
+        return (provider.product_detail(request, product_code, offer_id, coupon_ref, variant_of=variant_of) if variant_of
+                else provider.product_detail(request, product_code, offer_id, coupon_ref))
 
     @server.tool(annotations=READ)
     @protected

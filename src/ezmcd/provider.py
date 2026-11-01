@@ -7,7 +7,8 @@ from .errors import EzMcdError
 from .discovery import cities, pickup_choices, resolve_city, store_results
 from .models import pickup_time, cents, yuan, fingerprint
 from .protocol.signing import device_update_metadata
-from .products import choose_offer, configured_product, public_detail
+from .products import choose_offer, configured_product, public_detail, configurable
+from .variants import resolve_variant
 from .coupons import coupon_rows, choose_coupon, coupon_offers, public_coupon, public_coupon_products
 from .transport import Transport, data
 
@@ -129,15 +130,24 @@ class McdProvider:
             "cardId": offer.get("cardId") or "", "pinId": "", "date": params["date"].replace("-", ""),
             "fromCombo": False, "customization": False}))
 
-    def product_detail(self, args, product_code, offer_id=None, coupon_ref=None):
+    def product_detail(self, args, product_code, offer_id=None, coupon_ref=None, variant_of=None):
+        if variant_of is not None and (coupon_ref is not None or not offer_id or variant_of == product_code):
+            raise EzMcdError("variant_requires_explicit_regular_parent_offer")
         daypart, params = self.context(args)
         coupon = None
         if coupon_ref:
             coupon, menu = self._coupon_offers(args, coupon_ref, daypart, params)
         else:
             menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
-        offer = choose_offer(menu, product_code, offer_id)
-        result = public_detail(self._detail(offer, daypart, params), offer)
+        offer = choose_offer(menu, variant_of or product_code, offer_id)
+        detail = self._detail(offer, daypart, params)
+        if variant_of:
+            offer, detail = resolve_variant(detail, offer, product_code)
+        result = public_detail(detail, offer)
+        if variant_of:
+            result.update(variant_of=variant_of, display_price_cny=yuan(offer["priceInfo"]["eatInPrice"]),
+                pricing_source="regular_parent_variant_detail", optional_promotions_present=offer["_optional_promotions"],
+                related_products_selected=False)
         if coupon:
             result.update(coupon_ref=coupon_ref, coupon=public_coupon(coupon))
             if offer["_coupon_configuration_issues"]:
@@ -149,7 +159,18 @@ class McdProvider:
             variant["menu_offers"] = [{"offer_id": p["offer_id"], "card_name": p.get("cardName"),
                 "display_price_cny": yuan(p["priceInfo"]["eatInPrice"]) if type(p.get("priceInfo", {}).get("eatInPrice")) is int else None}
                 for p in menu if p["productCode"] == variant["product_code"] and str(p.get("productType")) in ("1", "7")]
-            variant["next_step"] = "product_detail_with_variant_code_and_menu_offer" if variant["menu_offers"] else "variant_not_in_current_menu_use_official_app"
+            variant["parent_detail_selection"] = None
+            try:
+                resolved, selected = resolve_variant(detail, offer, variant["product_code"])
+                if not configurable(selected["product"]):
+                    raise EzMcdError("advanced_customization_requires_official_cart")
+                variant["parent_detail_selection"] = {"product_code": variant["product_code"],
+                    "variant_of": product_code, "offer_id": offer["offer_id"]}
+                variant["optional_promotions_present"] = resolved["_optional_promotions"]
+            except EzMcdError as error:
+                variant["parent_detail_issue"] = error.code
+            variant["next_step"] = ("product_detail_with_variant_code_and_menu_offer" if variant["menu_offers"] else
+                "product_detail_with_parent_detail_selection" if variant["parent_detail_selection"] else "variant_not_in_current_menu_use_official_app")
         return result
 
     def configured_cart_draft(self, args, selections):
@@ -174,8 +195,11 @@ class McdProvider:
                 if menu is None:
                     menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
                 offers = menu
-            offer = choose_offer(offers, selection.product_code, selection.offer_id)
-            products.append(configured_product(selection, offer, self._detail(offer, daypart, params), index + 1))
+            offer = choose_offer(offers, selection.variant_of or selection.product_code, selection.offer_id)
+            detail = self._detail(offer, daypart, params)
+            if selection.variant_of:
+                offer, detail = resolve_variant(detail, offer, selection.product_code)
+            products.append(configured_product(selection, offer, detail, index + 1))
         return params | {"cartType": "1", "channelCode": "03", "pinId": "", "dataSource": 1,
                          "daypartCode": daypart, "scenes": "", "products": products}
 
@@ -235,7 +259,7 @@ class McdProvider:
     def simple_cart_draft(self, args, selections):
         if not 1 <= len(selections) <= 20:
             raise EzMcdError("select_between_1_and_20_products")
-        if any(s.combo or s.modifiers is not None or s.coupon_ref is not None for s in selections):
+        if any(s.combo or s.modifiers is not None or s.coupon_ref is not None or s.variant_of is not None for s in selections):
             raise EzMcdError("use_cart_add_configured_for_combo_choices")
         daypart, params = self.context(args)
         cart = self.get("/bff/cart/carts", params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart})

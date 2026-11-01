@@ -47,8 +47,8 @@
 | `menu_list` | 门店/时段菜单、名称过滤 | 只读 |
 | `coupons_list` | 当前账号、门店和时段的券、适用状态与规则 | 只读 |
 | `coupon_products` | 使用当前 coupon_ref 查询对应商品 | 只读 |
-| `product_detail` | 套餐轮次、配料、数量及加价；可传 coupon_ref | 只读 POST |
-| `cart_add_configured` | 按实时详情选择组件、单品、卡优惠或支持的单品券 | 改空购物车，需幂等键 |
+| `product_detail` | 套餐轮次、规格、配料、数量及加价；可传 coupon_ref，普通父页规格可传 variant_of | 只读 POST |
+| `cart_add_configured` | 按实时详情选择组件、单品、普通父页规格、卡优惠或支持的单品券 | 改空购物车，需幂等键 |
 | `cart_get` | 已配置购物车及120秒 cart_ref | 外部只读，本机保存引用 |
 | `cart_clear` | 清空用户要移除的整份购物车 | 改购物车；需新鲜引用与幂等键，重复只查询 |
 | `cart_add_status` | 找回指定或最新加购，并核对当前车 | 外部只读；本机记录核对结果，不重发 |
@@ -117,7 +117,7 @@
 
 `simulation=true`始终表示离线演示，演示店号和取餐号不能实际使用。
 
-`product_detail` 会返回 `modifiers` 支持标记。免费保留/去除配料给出 `code` 与 `quantity`（0 或 1）；单选组给出一个选项的 `code`、`quantity=1` 及实时 `key`。传入时不能漏掉活动组。加购回读未确认配料时停止，不能换 key 重试。规格聚合页的 `variants[].menu_offers` 用于继续查询具体商品，不能直接购买聚合页。详见[商品选择](products.md)。
+`product_detail` 会返回 `modifiers` 支持标记。免费保留/去除配料给出 `code` 与 `quantity`（0 或 1）；单选组给出一个选项的 `code`、`quantity=1` 及实时 `key`。传入时不能漏掉活动组。加购回读未确认配料时停止，不能换 key 重试。规格聚合页优先用 `variants[].menu_offers` 查询具体商品；没有独立菜单项的普通规格，可使用非空的 `parent_detail_selection`，详情和加购均保留其中的 `variant_of` 与父入口 `offer_id`。不能直接购买聚合页或借用父页卡券优惠。详见[商品选择](products.md)。
 
 `coupons_list → coupon_products → product_detail` 使用同一 `request`，详情与选择带上返回的 `coupon_ref`。加购前重新核验，券失效时不回退原价；加购后必须回读确认券。详见[优惠券选择](coupons.md)。
 
