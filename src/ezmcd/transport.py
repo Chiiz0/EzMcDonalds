@@ -16,6 +16,8 @@ READS = {
     "/bff/member/mwallet/token": ("1005", "501"),
     "/bff/promotion/coupons/rightCards": ("1073", "300"),
     "/bff/store/stores/collection/list": None,
+    "/bff/store/cities/group": None,
+    "/bff/store/stores": ("1013", "103"),
     "/bff/store/stores/vicinity": ("1003", "102"),
     "/bff/spc/menu": ("1006", "101"),
     "/bff/cart/carts": ("1007", "101"),
@@ -97,6 +99,8 @@ class Transport:
 
 def data(result):
     payload = result["response"]
+    if result["http_status"] == 401 or payload.get("success") is not True and str(payload.get("code")) == "401":
+        raise EzMcdError("session_expired_reconnect_locally")
     if result["http_status"] != 200 or payload.get("success") is not True:
         raise EzMcdError("upstream_rejected_query_status_or_reconnect")
     return payload.get("data")

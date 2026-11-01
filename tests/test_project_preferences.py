@@ -1,0 +1,138 @@
+from copy import deepcopy
+from datetime import datetime, timedelta
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import Mock
+
+from pydantic import ValidationError
+
+from ezmcd.errors import EzMcdError
+from ezmcd.models import Policy, SHANGHAI, fingerprint
+from ezmcd.preferences import MealPreferences, save_preferences, get_preferences, plan_meal
+from ezmcd.service import Service
+from ezmcd.storage import Store
+
+
+class PreferenceTests(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.store = Store(Path(temporary.name))
+        self.record = {"alias": "test", "identity": fingerprint({"test": "preferences"}),
+                       "provider": "mcd-cn", "policy": Policy().model_dump()}
+        self.store.add_account(self.record)
+        self.provider = Mock()
+        self.service = Service(self.store, lambda _: self.provider)
+        self.when = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
+        self.provider.pickup_slots.return_value = {"dates": [{"date": self.when.date().isoformat(),
+            "periods": [{"pickup_times": [self.when.isoformat()]}]}]}
+        self.offer = {"name": "示例组合", "product_code": "100001", "product_type": 7,
+                      "offer_id": "offer", "display_price_cny": "10.00", "card_name": "示例早餐卡"}
+        self.provider.menu.return_value = {"products": [self.offer]}
+        choice = {"product_code": "200001", "name": "咖啡", "available": True,
+                  "standard_configuration_supported": True, "extra_cny": "0.00"}
+        self.detail = {"max_quantity": 10, "groups": [{"round": 1, "name": "饮品", "min_quantity": 1,
+                                                     "max_quantity": 1, "choices": [choice]}]}
+        self.provider.product_detail.return_value = self.detail
+        self.preferences = MealPreferences(store_code="9000001", items=[{"name": "示例组合", "component_names": ["咖啡"]}],
+                                           pickup_time="10:15", max_amount_cny="20", require_card_discount=True)
+        save_preferences(self.store, self.preferences)
+
+    def test_saving_is_not_spending_authorization_or_scheduling(self):
+        before = deepcopy(self.store.account("test"))
+        result = get_preferences(self.store)
+        self.assertFalse(result["scheduling_enabled"])
+        self.assertFalse(result["spending_authorized_by_preferences"])
+        self.assertEqual(self.store.account("test"), before)
+        self.assertEqual((self.store.root / "preferences.json").stat().st_mode & 0o777, 0o600)
+
+    def test_plan_resolves_live_offer_component_time_and_stable_purchase_key_without_writes(self):
+        result = plan_meal(self.service, "test")
+        self.assertTrue(result["selection_ready"])
+        self.assertEqual(result["request"]["pickup_at"], self.when.isoformat())
+        self.assertEqual(result["estimated_amount_cny"], "10.00")
+        self.assertEqual(result["items"][0]["combo"][0]["items"][0]["product_code"], "200001")
+        self.assertEqual(plan_meal(self.service, "test")["idempotency_key"], result["idempotency_key"])
+        self.assertFalse(result["order_created"])
+        self.assertFalse(result["cart_changed"])
+        self.assertFalse(result["estimated_price_is_final_quote"])
+        for call in self.provider.method_calls:
+            self.assertIn(call[0], ("pickup_slots", "menu", "product_detail"))
+        with self.store.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM writes").fetchone()[0], 0)
+
+    def test_account_must_be_selected_and_missing_alias_is_not_guessed(self):
+        with self.assertRaisesRegex(EzMcdError, "select_account"):
+            plan_meal(self.service)
+        with self.assertRaisesRegex(EzMcdError, "account_not_connected"):
+            plan_meal(self.service, "absent")
+
+    def test_unavailable_time_does_not_choose_another_time_or_load_menu(self):
+        self.provider.pickup_slots.return_value["dates"][0]["periods"][0]["pickup_times"] = [self.when.replace(hour=9).isoformat()]
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.assertEqual(result["issues"][0]["reason"], "preferred_pickup_time_unavailable")
+        self.provider.menu.assert_not_called()
+
+    def test_requested_date_and_weekdays_are_respected(self):
+        result = plan_meal(self.service, "test", (self.when.date() + timedelta(days=1)).isoformat())
+        self.assertFalse(result["selection_ready"])
+        self.preferences.weekdays = [(self.when.weekday() + 1) % 7]
+        save_preferences(self.store, self.preferences)
+        self.assertFalse(plan_meal(self.service, "test")["selection_ready"])
+
+    def test_missing_card_offer_does_not_silently_use_regular_price(self):
+        self.offer["card_name"] = None
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.assertEqual(result["items"], [])
+        self.provider.product_detail.assert_not_called()
+
+    def test_different_products_with_same_name_require_selection(self):
+        self.provider.menu.return_value["products"].append(self.offer | {"product_code": "100002"})
+        self.assertFalse(plan_meal(self.service, "test")["selection_ready"])
+        self.provider.product_detail.assert_not_called()
+
+    def test_group_landing_items_are_not_mistaken_for_orderable_combos(self):
+        self.provider.menu.return_value["products"].append(self.offer | {"product_code": "G100001", "product_type": 3})
+        self.assertTrue(plan_meal(self.service, "test")["selection_ready"])
+
+    def test_unavailable_preferred_drink_is_not_replaced_by_available_alternative(self):
+        self.detail["groups"][0]["choices"][0]["available"] = False
+        self.detail["groups"][0]["choices"].append({"product_code": "200002", "name": "豆浆", "available": True,
+            "standard_configuration_supported": True, "extra_cny": "0.00"})
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.assertEqual(result["items"], [])
+
+    def test_drink_missing_and_unsupported_customization_stop(self):
+        for key, value in (("name", "另一杯咖啡"), ("standard_configuration_supported", False)):
+            original = deepcopy(self.detail)
+            self.detail["groups"][0]["choices"][0][key] = value
+            self.assertFalse(plan_meal(self.service, "test")["selection_ready"])
+            self.detail.clear(); self.detail.update(original)
+
+    def test_extra_price_and_quantity_are_included_in_estimate(self):
+        self.preferences.items[0].quantity = 2
+        save_preferences(self.store, self.preferences)
+        self.detail["groups"][0]["choices"][0]["extra_cny"] = "1.00"
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.assertIn("estimated_price_exceeds_preference_limit", json.dumps(result))
+
+    def test_opaque_offer_choice_uses_lowest_known_display_price_for_same_product(self):
+        self.provider.menu.return_value["products"].append(self.offer | {"offer_id": "lower", "display_price_cny": "8.00"})
+        result = plan_meal(self.service, "test")
+        self.assertEqual(result["items"][0]["offer_id"], "lower")
+        self.assertEqual(result["estimated_amount_cny"], "8.00")
+
+    def test_preferences_do_not_accept_policy_or_schedule_fields(self):
+        for field in ("allow_checkout", "scheduling_enabled", "daily_budget_cents"):
+            with self.assertRaises(ValidationError):
+                MealPreferences.model_validate(self.preferences.model_dump() | {field: True})
+
+
+if __name__ == "__main__":
+    unittest.main()

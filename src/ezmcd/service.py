@@ -14,7 +14,12 @@ from .transport import data
 def quote_summary(q):
     return {k: q[k] for k in ("quote_id", "account", "store_code", "store_name", "pickup_at", "eat_type", "items", "discount_names", "expires_at", "simulation")} | {
         "amount_cny": yuan(q["amount_cents"]), "regular_cny": yuan(q["regular_cents"]),
-        "discount_cny": yuan(q["discount_cents"]), "order_created": False}
+        "discount_cny": yuan(q["discount_cents"]), "order_created": False,
+        "wallet_balance_cny": yuan(q["wallet_before_cents"]),
+        "wallet_sufficient": q["wallet_before_cents"] >= q["amount_cents"],
+        "wallet_shortfall_cny": yuan(max(0, q["amount_cents"] - q["wallet_before_cents"])),
+        "checkout_blockers": q.get("checkout_blockers", []),
+        "fresh_order_checks_still_required": True}
 
 
 def attempt_summary(a):
@@ -78,8 +83,14 @@ class Service:
             q.update(quote_id=uuid.uuid4().hex, account=args.account, request=args.model_dump(),
                      expires_at=time.time() + 120, wallet_before_cents=provider.wallet()["balance_cents"],
                      simulation=account["provider"] == "demo")
+            q["checkout_blockers"] = public_account(account, session_verified=True)["readiness"]["checkout_blockers"]
             if q["wallet_before_cents"] < q["amount_cents"]:
-                raise EzMcdError("insufficient_wallet_balance")
+                q["checkout_blockers"].append("insufficient_wallet_balance")
+            try:
+                self.policy(account, q)
+            except EzMcdError as error:
+                if error.code not in q["checkout_blockers"] and not (error.code == "local_checkout_policy_required" and "checkout_disabled" in q["checkout_blockers"]):
+                    q["checkout_blockers"].append(error.code)
             self.store.save_quote(account["identity"], q)
         return quote_summary(q)
 

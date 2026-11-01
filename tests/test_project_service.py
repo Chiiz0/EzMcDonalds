@@ -50,6 +50,20 @@ class ProjectCheckoutTests(unittest.TestCase):
         with self.assertRaisesRegex(EzMcdError, "quote_not_found_for_account"):
             self.service.submit("someone-else", q["quote_id"], "key")
 
+    def test_quote_remains_reviewable_with_empty_wallet_but_cannot_create_order(self):
+        with patch.object(DemoProvider, "wallet", return_value={"balance_cents": 0}), \
+                patch.object(DemoProvider, "create_order") as create:
+            q = self.quote()
+            self.assertEqual(q["amount_cny"], "10.00")
+            self.assertFalse(q["wallet_sufficient"])
+            self.assertEqual(q["wallet_shortfall_cny"], "10.00")
+            self.assertIn("insufficient_wallet_balance", q["checkout_blockers"])
+            with self.assertRaisesRegex(EzMcdError, "insufficient_wallet_balance"):
+                self.service.submit("demo", q["quote_id"], "empty-wallet")
+            create.assert_not_called()
+        with self.store.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM attempts").fetchone()[0], 0)
+
     def test_alias_cannot_reset_identity_budget(self):
         old = self.store.account("demo")
         with self.assertRaisesRegex(EzMcdError, "account_exists"):

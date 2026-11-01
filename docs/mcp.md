@@ -29,17 +29,24 @@
 | `capabilities` | 版本、支持范围、缺口 | 无 |
 | `account_connection_instructions` | 本地接入说明 | 无 |
 | `accounts_list` | 别名、脱敏标签、策略 | 无 |
+| `account_diagnose` | 本地环境、账号状态及后续步骤 | 可选只读余额检查 |
+| `preferences_get` | 读取偏好 | 本地只读 |
+| `preferences_save` | 保存门店、餐品和取餐偏好 | 本地写入；不授权消费、不创建调度 |
+| `meal_plan` | 按实时菜单、时段与偏好准备草案 | 只读，不加购或购买 |
+| `membership_assets` | 权益卡有效期、券分类数量 | 只读 |
+| `cities_list` | 城市名称及代码 | 只读 |
+| `stores_search` | 城市/店名或明确坐标查店 | 只读 |
 | `account_check` | 会话验证、余额、下单前置条件 | 只读 |
 | `account_refresh` | 已有账号会话维护、恢复核验 | 认证状态变更；不消费，不续期运行字段 |
 | `stores_favorites` | 收藏门店 | 只读 |
 | `store_get` | 按代码查店 | 只读 |
-| `pickup_slots` | 可预约时段 | 只读 |
+| `pickup_slots` | 北京时间具体可预约时间、餐段 | 只读 |
 | `menu_list` | 门店/时段菜单、名称过滤 | 只读 |
 | `product_detail` | 套餐轮次、组件、数量及加价 | 只读 POST |
 | `cart_add_configured` | 按实时详情选择组件、单品或卡优惠 | 改空购物车，需幂等键 |
 | `cart_get` | 已配置购物车 | 只读 |
 | `cart_add_simple` | 空购物车加普通无规格单品 | 改购物车，需幂等键 |
-| `checkout_quote` | 明细、优惠、上限、钱包验证 | 外部只读，本机保存报价 |
+| `checkout_quote` | 明细、优惠、上限、钱包缺口及下单阻碍 | 外部只读，本机保存报价 |
 | `checkout_submit` | 下单＋麦钱包付款＋核对 | **真实消费**，受策略限制 |
 | `order_pay` | 支付尚未开始付款的CREATED订单 | **真实消费**；已有尝试只查询 |
 | `order_status` | 订单、付款、余额、取餐码 | 只读 |

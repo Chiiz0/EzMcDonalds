@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a3`：本地 Python CLI + 17 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、消费策略、通用结算、防重复日志及无需账号的离线演示。
+**当前版本 `0.1.0a4`：本地 Python CLI + 24 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、套餐偏好、实时选餐方案、消费策略和防重复日志。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；下单运行字段尚不能自动更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
@@ -27,6 +27,12 @@ python3 -m venv .venv
 ```
 
 尚未发布到 PyPI。演示始终返回 `simulation=true`，不会连接麦当劳或真实扣费。
+
+## 开始使用
+
+已有会员可先运行 `ezmcd doctor` 检查环境与账号。个人 Agent 可以按城市和店名找店，读取菜单、卡券概况，保存套餐偏好并调用 `meal_plan` 生成实时选餐方案。
+
+[获取自己的凭据](docs/credentials.md) · [偏好与选餐方案](docs/meal-planning.md) · [会话维护](docs/session-maintenance.md)
 
 ## 连接自己的账号
 
@@ -73,10 +79,10 @@ chmod 600 /absolute/path/account.har
 
 推荐调用顺序：
 
-1. `capabilities` → `accounts_list` → `account_check`；已有刷新令牌时可调用 `account_refresh` 维护会话。
-2. `stores_favorites` / `store_get` → `pickup_slots` → `menu_list`。
+1. `capabilities` → `accounts_list` → `account_diagnose`；已有刷新令牌时可调用 `account_refresh` 维护会话。
+2. `stores_search` / `stores_favorites` → `pickup_slots` → `membership_assets` / `menu_list`。
 3. `product_detail` 查看套餐轮次和组件；`cart_add_configured` 添加明确选择的商品到空购物车。复杂定制可先在官方 App 配置，再调用 `cart_get`。
-4. `checkout_quote` 核对商品、优惠和最终金额，报价有效期 120 秒。
+4. 常用餐品可通过 `preferences_save` 保存，再用 `meal_plan` 生成草案。`checkout_quote` 核对商品、优惠和最终金额，报价有效期 120 秒；余额不足仍展示报价和付款缺口。
 5. 本地策略已授权时，`checkout_submit` 创建并支付一单；同一购买使用稳定的 `idempotency_key`。
 6. `order_status` 查询订单与取餐号。未知结果只查询，不换 key 重下。
 

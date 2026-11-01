@@ -2,8 +2,9 @@ from datetime import datetime, timezone
 import json
 import re
 
-from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items
+from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items, menu_categories, membership_assets
 from .errors import EzMcdError
+from .discovery import cities, pickup_choices, resolve_city, store_results
 from .models import pickup_time, cents
 from .protocol.signing import device_update_metadata
 from .products import choose_offer, configured_product, public_detail
@@ -21,8 +22,30 @@ class McdProvider:
     def wallet(self):
         return {"balance_cents": cents(self.get("/bff/member/mwallet/balance")["balance"])}
 
+    def assets(self):
+        return membership_assets(self.get("/bff/promotion/coupons/rightCards", {"scene": "3"}))
+
     def favorites(self):
         return self.get("/bff/store/stores/collection/list", {"beType": "1"})
+
+    def cities(self, keyword=""):
+        if not isinstance(keyword, str) or len(keyword) > 60:
+            raise EzMcdError("invalid_city_keyword")
+        return {"cities": cities(self.get("/bff/store/cities/group"), keyword)}
+
+    def search_stores(self, request):
+        if request.city:
+            code = request.city if re.fullmatch(r"[0-9]{6}", request.city) else resolve_city(
+                self.get("/bff/store/cities/group"), request.city)
+            raw = self.get("/bff/store/stores", {"pageNo": str(request.page), "pageSize": str(request.limit),
+                "cityCode": code, "keyword": request.keyword, "hotTagCode": "", "beType": "1", "dayPartCodes": ""})
+            return store_results(raw, request) | {"city_code": code}
+        raw = self.get("/bff/store/stores/vicinity", {"latitude": str(request.latitude),
+            "longitude": str(request.longitude), "showType": "2", "beType": "1", "orderType": "1"})
+        return store_results(raw, request, nearby=True)
+
+    def pickup_slots(self, code):
+        return pickup_choices(self.reservation(code), code)
 
     def store(self, code):
         if not re.fullmatch(r"[0-9]{7}", code):
@@ -47,7 +70,8 @@ class McdProvider:
     def menu(self, args, keyword=""):
         daypart, params = self.context(args)
         raw = self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart})
-        return {"store_code": args.store_code, "pickup_at": args.pickup_at, "products": public_menu(raw, keyword)}
+        return {"store_code": args.store_code, "pickup_at": args.pickup_at,
+                "categories": menu_categories(raw), "products": public_menu(raw, keyword)}
 
     def cart(self, args):
         daypart, params = self.context(args)

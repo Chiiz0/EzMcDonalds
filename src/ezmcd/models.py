@@ -3,7 +3,7 @@ from decimal import Decimal, InvalidOperation
 from hashlib import sha256
 import json
 from zoneinfo import ZoneInfo
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .errors import EzMcdError
 
@@ -115,3 +115,28 @@ class CheckoutInput(BaseModel):
         if value != "locker-in":
             raise ValueError("This adapter currently supports in-store pickup lockers")
         return value
+
+
+class StoreSearch(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    account: str = Field(pattern=r"^[A-Za-z0-9_-]{1,40}$")
+    city: str | None = Field(default=None, min_length=1, max_length=60)
+    keyword: str = Field(default="", max_length=80)
+    latitude: float | None = Field(default=None, ge=-90, le=90, allow_inf_nan=False)
+    longitude: float | None = Field(default=None, ge=-180, le=180, allow_inf_nan=False)
+    page: int = Field(default=1, ge=1, le=100)
+    limit: int = Field(default=10, ge=1, le=30)
+
+    @field_validator("city", "keyword")
+    @classmethod
+    def text(cls, value):
+        if value is not None and (any(ord(c) < 32 for c in value) or not value.strip() and value):
+            raise ValueError("Use a city name/code and a plain search term")
+        return value.strip() if value is not None else None
+
+    @model_validator(mode="after")
+    def location(self):
+        coordinates = self.latitude is not None or self.longitude is not None
+        if bool(self.city) == coordinates or coordinates and (self.latitude is None or self.longitude is None):
+            raise ValueError("Provide either city name/code or both latitude and longitude")
+        return self

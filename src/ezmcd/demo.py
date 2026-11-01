@@ -5,7 +5,8 @@ import uuid
 
 from .catalog import checkout
 from .errors import EzMcdError
-from .models import Policy, fingerprint, pickup_time, yuan
+from .models import Policy, SHANGHAI, fingerprint, pickup_time, yuan
+from .discovery import pickup_choices, restaurant
 from .provider import McdProvider
 from .storage import read_private, write_private
 
@@ -36,6 +37,28 @@ class DemoProvider:
     def favorites(self):
         return {"list": [self.store("9000001"), self.store("9000002")]}
 
+    def assets(self):
+        return {"simulation": True, "cards": [], "coupon_categories": [],
+                "applicability_requires_live_menu_and_quote": True}
+
+    def cities(self, keyword=""):
+        rows = [{"city_code": "900000", "name": "演示城市"}]
+        return {"simulation": True, "cities": [r for r in rows if keyword in r["name"] or keyword == r["city_code"]]}
+
+    def search_stores(self, request):
+        rows = [restaurant(self.store(code)) for code in ("9000001", "9000002")]
+        rows = [r for r in rows if request.keyword in r["name"]]
+        start = (request.page - 1) * request.limit
+        return {"simulation": True, "stores": rows[start:start + request.limit], "total": len(rows),
+                "page": request.page, "limit": request.limit, "has_more": start + request.limit < len(rows)}
+
+    def pickup_slots(self, code):
+        self.store(code)
+        today = datetime.now(SHANGHAI).date()
+        raw = {"timeInterval": 5, "reservationOptions": [{"date": (today + timedelta(days=i)).isoformat(),
+               "timeOptions": [{"timeStart": "07:00", "timeEnd": "23:00", "dayPartCode": 1, "dayPartName": "演示时段"}]} for i in range(2)]}
+        return pickup_choices(raw, code) | {"simulation": True}
+
     def store(self, code):
         if code not in ("9000001", "9000002"):
             raise EzMcdError("demo_store_not_found")
@@ -47,14 +70,15 @@ class DemoProvider:
 
     def menu(self, args, keyword=""):
         self.store(args.store_code)
-        return {"simulation": True, "products": [{"product_code": "100001", "name": "演示汉堡",
+        return {"simulation": True, "categories": [{"category_code": "demo", "names": ["演示餐品"], "product_count": 1}],
+            "products": [{"product_code": "100001", "name": "演示汉堡", "offer_id": "demo-offer", "product_type": 1,
             "display_price_cny": "10.00", "requires_configuration": False, "display_price_is_final_quote": False}]}
 
     def product_detail(self, args, product_code, offer_id=None):
         self.store(args.store_code)
         if product_code != "100001":
             raise EzMcdError("demo_product_not_found")
-        return {"simulation": True, "product_code": "100001", "name": "演示汉堡",
+        return {"simulation": True, "product_code": "100001", "name": "演示汉堡", "offer_id": "demo-offer",
                 "product_type": 1, "groups": [], "max_quantity": 20, "display_price_is_final_quote": False}
 
     def configured_cart_draft(self, args, selections):

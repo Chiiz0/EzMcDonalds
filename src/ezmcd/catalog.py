@@ -1,6 +1,7 @@
 """Normalize live menus and validate checkout without a fixed store or meal."""
 from copy import deepcopy
 from datetime import datetime
+from urllib.parse import urlsplit
 
 from .errors import EzMcdError
 from .models import cents, fingerprint, pickup_time, yuan
@@ -29,13 +30,42 @@ def public_menu(menu, keyword=""):
             continue
         seen.add(item["offer_id"])
         price = item.get("priceInfo", {}).get("eatInPrice")
+        picture = item.get("productImage", "")
+        parsed = urlsplit(picture) if isinstance(picture, str) else None
+        safe_picture = picture if parsed and parsed.scheme == "https" and parsed.hostname and parsed.hostname.endswith(".mcd.cn") else None
         result.append({"product_code": item["productCode"], "name": item.get("productName"),
             "offer_id": item["offer_id"], "product_type": item.get("productType"),
             "categories": item["category_names"], "description": item.get("memo", ""),
             "display_price_cny": yuan(price) if type(price) is int else None,
+            "image_url": safe_picture, "max_quantity": item.get("maxPurchaseQuantity"),
+            "availability_requires_detail_check": True,
             "card_name": item.get("cardName"), "requires_configuration": bool(item.get("isChoices") or item.get("needDetail") or str(item.get("productType")) != "1"),
             "display_price_is_final_quote": False})
     return result
+
+
+def menu_categories(menu):
+    result = []
+    def walk(rows, parents=()):
+        for row in rows:
+            names = (*parents, row.get("categoryName", ""))
+            result.append({"category_code": str(row.get("categoryCode", "")), "names": list(names),
+                           "product_count": len(row.get("productList", []))})
+            walk(row.get("categories", []), names)
+    walk(menu.get("menu", []))
+    return result
+
+
+def membership_assets(raw):
+    if not isinstance(raw, dict) or not isinstance(raw.get("cards"), list):
+        raise EzMcdError("membership_assets_schema_changed")
+    # Never return card numbers, credential-bearing jump URLs, or opaque coupon IDs.
+    return {"cards": [{"name": c.get("title"), "validity": c.get("validPeriodText"),
+        "valid_from": c.get("redeemStartTime"), "valid_until": c.get("redeemEndTime"),
+        "days_left": c.get("leftDays"), "reported_count": c.get("count")} for c in raw["cards"]],
+        "coupon_categories": [{"name": c.get("name"), "count": c.get("count"), "description": c.get("text")}
+                              for c in raw.get("couponCategories", [])],
+        "applicability_requires_live_menu_and_quote": True}
 
 
 def reservation_daypart(reservation, pickup):

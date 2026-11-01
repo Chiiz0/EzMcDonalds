@@ -9,7 +9,7 @@ from pydantic import ValidationError
 
 from .accounts import connect_har, connect_samples, import_session, revoke_local
 from .demo import setup_demo
-from .errors import EzMcdError
+from .errors import EzMcdError, error_result
 from .models import CheckoutInput, Policy, cents, SHANGHAI
 from .service import Service
 from .storage import Store
@@ -21,6 +21,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     account = commands.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("list")
+    account.add_parser("guide", help="Show the local credentials setup guide without asking for secrets")
     check = account.add_parser("check")
     check.add_argument("alias")
     refresh = account.add_parser("refresh", help="Refresh an existing session once, or resume its read-only verification")
@@ -74,6 +75,17 @@ def main():
     status.add_argument("account")
     status.add_argument("attempt_id")
     commands.add_parser("mcp-config")
+    diagnose = commands.add_parser("doctor", help="Check local setup; optionally verify existing account sessions without purchases")
+    diagnose.add_argument("--account")
+    diagnose.add_argument("--verify-session", action="store_true")
+    diagnose.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
+    preferences = commands.add_parser("preferences").add_subparsers(dest="preference_action", required=True)
+    preferences.add_parser("show")
+    pref_save = preferences.add_parser("save")
+    pref_save.add_argument("--file", required=True, help="Local JSON preferences file; does not authorize spending")
+    pref_plan = preferences.add_parser("plan")
+    pref_plan.add_argument("--account")
+    pref_plan.add_argument("--date")
     args = parser.parse_args()
     try:
         store = Store(Path(args.data_dir))
@@ -81,9 +93,24 @@ def main():
         if args.command == "mcp-config":
             result = {"mcpServers": {"ezmcdonalds": {"command": sys.executable,
                 "args": ["-m", "ezmcd.mcp_server"], "env": {"EZMCD_DATA_DIR": str(store.root)}}}}
+        elif args.command == "doctor":
+            from .diagnostics import doctor
+            result = doctor(service, args.account, verify_session=args.verify_session, binary=args.binary)
+        elif args.command == "preferences":
+            from .preferences import MealPreferences, get_preferences, save_preferences, plan_meal
+            from .storage import read_private
+            if args.preference_action == "show":
+                result = get_preferences(store)
+            elif args.preference_action == "save":
+                result = save_preferences(store, MealPreferences.model_validate(read_private(Path(args.file).expanduser())))
+            else:
+                result = plan_meal(service, args.account, args.date)
         elif args.command == "account":
             if args.action == "list":
                 result = {"accounts": service.accounts()}
+            elif args.action == "guide":
+                from .diagnostics import credentials_guide
+                result = credentials_guide()
             elif args.action == "check":
                 result = service.check_account(args.alias)
             elif args.action == "refresh":
@@ -136,7 +163,7 @@ def main():
         if args.command == "account" and args.action == "login" and result.get("state") != "CONNECTED":
             return 2
     except EzMcdError as error:
-        print(json.dumps({"ok": False, "error": error.code, "automatic_write_retry": False}), file=sys.stderr)
+        print(json.dumps(error_result(error.code), ensure_ascii=False), file=sys.stderr)
         return 2
     except (KeyboardInterrupt, EOFError):
         print('{"ok":false,"error":"local_login_input_cancelled","automatic_write_retry":false}', file=sys.stderr)

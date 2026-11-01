@@ -7,8 +7,9 @@ from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
 from . import __version__
-from .errors import EzMcdError
-from .models import CheckoutInput, ItemSelection
+from .errors import EzMcdError, error_result
+from .models import CheckoutInput, ItemSelection, StoreSearch
+from .preferences import MealPreferences, get_preferences, save_preferences, plan_meal
 from .service import Service
 from .storage import Store
 
@@ -16,6 +17,7 @@ READ = ToolAnnotations(read_only_hint=True, open_world_hint=True)
 CART = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=True)
 PAY = ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=True)
 AUTH = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False, open_world_hint=True)
+LOCAL = ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True, open_world_hint=False)
 
 
 def protected(fn):
@@ -24,7 +26,7 @@ def protected(fn):
         try:
             return fn(*args, **kwargs)
         except EzMcdError as error:
-            return {"ok": False, "error": error.code, "automatic_write_retry": False}
+            return error_result(error.code)
         except (OSError, ValueError, KeyError, TypeError):
             return {"ok": False, "error": "operation_stopped_check_local_account_or_status", "automatic_write_retry": False}
     return call
@@ -33,7 +35,9 @@ def protected(fn):
 def build_server(service):
     server = MCPServer("EzMcDonald's", version=__version__, log_level="WARNING",
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
-        "Inspect a fresh quote before checkout_submit. Use a stable idempotency key per user purchase. "
+        "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
+        "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
+        "Use a stable idempotency key per user purchase. "
         "After any ambiguous result query order_status; never create a replacement to retry payment. "
         "simulation=true means an offline demo, never a real order.")
 
@@ -45,7 +49,9 @@ def build_server(service):
             "sms_login_scope": "local_terminal_existing_member_requires_observed_official_device_context",
             "sms_login_via_mcp": False, "session_auto_refresh": False,
             "session_refresh": "explicit account_refresh; local 24h rotation interval, no ambiguous POST retries",
-            "stores": "any store code with compatible live pickup menu and locker option",
+            "stores": "city/name search or explicit coordinates, favorites, live pickup slots; compatible locker pickup required",
+            "meal_preferences": "local saved choices and read-only live meal_plan; no purchase authorization or scheduling",
+            "membership_assets": "card validity and coupon category counts; actual eligibility from live menu and quote",
             "products": "ordinary items and combos; fresh product_detail and cart_add_configured support standard component choices",
             "combo_configuration": "explicit choices for each round; advanced modifications use the official cart",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
@@ -56,6 +62,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     def account_connection_instructions() -> dict:
         """Explain local enrollment; do not paste session files, SMS codes, or tokens into chat."""
+        from .diagnostics import credentials_guide
         return {"method": "official_device_bootstrap_then_local_sms_or_session_import", "sms_login_implemented": True,
             "sms_login": {"entry": "ezmcd account login NEW_ALIAS --device-from EXISTING_ALIAS",
                 "requires": "user-owned official device context from a locally connected account",
@@ -65,7 +72,33 @@ def build_server(service):
                       "Export only the authorized official balance exchange to a private local HAR or sample file.",
                       "Run ezmcd account connect --har locally; same-session v5 evidence is additionally required for checkout.",
                       "Use account_check; set spending limits locally only when checkout is wanted."],
-            "documentation": "docs/onboarding.md", "phone_label_is_not_authentication": True}
+            "documentation": "docs/onboarding.md", "phone_label_is_not_authentication": True,
+            "local_guide": credentials_guide()}
+
+    @server.tool(annotations=READ)
+    @protected
+    def account_diagnose(account: str, verify_session: bool = True) -> dict:
+        """Explain client, session, device and checkout readiness with next steps. Optional live check only reads wallet balance; never refreshes, logs in, or purchases."""
+        from .diagnostics import doctor
+        return doctor(service, account, verify_session=verify_session)
+
+    @server.tool(annotations=READ)
+    @protected
+    def preferences_get() -> dict:
+        """Read locally saved store, meal, component, pickup-time and budget preferences. These do not authorize spending or enable a schedule."""
+        return get_preferences(service.store)
+
+    @server.tool(annotations=LOCAL)
+    @protected
+    def preferences_save(preferences: MealPreferences) -> dict:
+        """Save the user's requested meal preferences locally. Does not change account spending policy, create a schedule, modify a cart, or buy anything."""
+        return save_preferences(service.store, preferences)
+
+    @server.tool(annotations=READ)
+    @protected
+    def meal_plan(account: str | None = None, date: str | None = None) -> dict:
+        """Resolve saved preferences against live pickup slots, menu/card offers and combo choices. Returns a draft selection, not an order. Never silently substitutes unavailable items or times; date is YYYY-MM-DD in Shanghai."""
+        return plan_meal(service, account, date)
 
     @server.tool(annotations=READ)
     @protected
@@ -87,10 +120,31 @@ def build_server(service):
 
     @server.tool(annotations=READ)
     @protected
+    def membership_assets(account: str) -> dict:
+        """Read membership cards and coupon counts, without card numbers or credentials. Actual discount eligibility comes from the live store/time menu and checkout_quote."""
+        _, provider = service.provider(account)
+        return provider.assets()
+
+    @server.tool(annotations=READ)
+    @protected
     def stores_favorites(account: str) -> dict:
         """Read this account's saved pickup restaurants."""
         _, provider = service.provider(account)
         return {"stores": provider.favorites()}
+
+    @server.tool(annotations=READ)
+    @protected
+    def cities_list(account: str, keyword: str = "") -> dict:
+        """Find city names/codes for pickup restaurant search. Does not obtain the user's location."""
+        _, provider = service.provider(account)
+        return provider.cities(keyword)
+
+    @server.tool(annotations=READ)
+    @protected
+    def stores_search(request: StoreSearch) -> dict:
+        """Find pickup restaurants by city name/code and keyword, OR explicit coordinates. Paginated results include address and hours; check pickup_slots for the chosen store."""
+        _, provider = service.provider(request.account)
+        return provider.search_stores(request)
 
     @server.tool(annotations=READ)
     @protected
@@ -104,7 +158,7 @@ def build_server(service):
     def pickup_slots(account: str, store_code: str) -> dict:
         """Get currently available pickup dates, times, and meal periods for a store."""
         _, provider = service.provider(account)
-        return {"slots": provider.reservation(store_code)}
+        return provider.pickup_slots(store_code)
 
     @server.tool(annotations=READ)
     @protected

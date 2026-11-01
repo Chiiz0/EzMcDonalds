@@ -28,6 +28,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("product_detail", names)
                 self.assertIn("cart_add_configured", names)
                 self.assertIn("account_refresh", names)
+                self.assertTrue({"cities_list", "stores_search", "membership_assets", "preferences_get", "preferences_save", "meal_plan"}.issubset(names))
                 refresh = next(t for t in tools if t.name == "account_refresh")
                 self.assertFalse(refresh.annotations.read_only_hint)
                 self.assertFalse(refresh.annotations.idempotent_hint)
@@ -47,6 +48,16 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 instructions = await client.call_tool("account_connection_instructions", {})
                 self.assertIn("--device-from", instructions.content[0].text)
                 pickup = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
+                found = json.loads((await client.call_tool("stores_search", {"request": {
+                    "account": "demo", "city": "演示城市", "keyword": "门店"}})).content[0].text)
+                self.assertTrue(found["simulation"])
+                self.assertEqual(len(found["stores"]), 2)
+                await client.call_tool("preferences_save", {"preferences": {"account": "demo", "store_code": "9000001",
+                    "items": [{"name": "演示汉堡"}], "pickup_time": "10:15", "max_amount_cny": "20.00"}})
+                plan = json.loads((await client.call_tool("meal_plan", {"date": pickup.date().isoformat()})).content[0].text)
+                self.assertTrue(plan["simulation"])
+                self.assertTrue(plan["selection_ready"])
+                self.assertFalse(plan["cart_changed"])
                 request = {"account": "demo", "store_code": "9000001", "pickup_at": pickup.isoformat(), "max_amount_cny": "20.00"}
                 detail = json.loads((await client.call_tool("product_detail", {"request": request, "product_code": "100001"})).content[0].text)
                 self.assertTrue(detail["simulation"])
