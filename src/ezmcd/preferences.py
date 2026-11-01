@@ -28,6 +28,7 @@ class PreferredModifier(BaseModel):
 class PreferredComponentModifiers(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     component_name: str = Field(min_length=1, max_length=120)
+    round: int | None = Field(default=None, ge=0, le=100, exclude_if=lambda value: value is None)
     modifiers: list[PreferredModifier] = Field(min_length=1, max_length=20)
 
     @field_validator("modifiers")
@@ -36,6 +37,20 @@ class PreferredComponentModifiers(BaseModel):
         if len({(v.group_name, v.name) for v in values}) != len(values):
             raise ValueError("Choose each ingredient only once")
         return values
+
+
+class PreferredComponentChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    round: int = Field(ge=0, le=100)
+    name: str = Field(min_length=1, max_length=120)
+    quantity: int = Field(default=1, ge=1, le=20)
+
+    @field_validator("name")
+    @classmethod
+    def nonempty(cls, value):
+        if not value.strip():
+            raise ValueError("Choose a component name from product_detail")
+        return value
 
 
 class PreferredItem(BaseModel):
@@ -47,6 +62,8 @@ class PreferredItem(BaseModel):
     coupon_name: str | None = Field(default=None, min_length=1, max_length=120)
     quantity: int = Field(default=1, ge=1, le=20)
     component_names: list[str] = Field(default_factory=list, max_length=20)
+    component_choices: list[PreferredComponentChoice] | None = Field(default=None, max_length=20,
+        exclude_if=lambda value: value is None)
     modifiers: list[PreferredModifier] = Field(default_factory=list, max_length=20)
     component_modifiers: list[PreferredComponentModifiers] = Field(default_factory=list, max_length=20)
 
@@ -57,6 +74,15 @@ class PreferredItem(BaseModel):
             raise ValueError("Variant specification names require a parent and nonempty names from product_detail")
         return self
 
+    @model_validator(mode="after")
+    def distinct_component_choices(self):
+        if self.component_choices is not None:
+            if self.component_names:
+                raise ValueError("Use component_choices or component_names, not both")
+            if len({(v.round,v.name) for v in self.component_choices}) != len(self.component_choices):
+                raise ValueError("Choose each component once per round and combine its quantity")
+        return self
+
     @field_validator("modifiers")
     @classmethod
     def distinct_modifiers(cls, values):
@@ -65,8 +91,11 @@ class PreferredItem(BaseModel):
     @field_validator("component_modifiers")
     @classmethod
     def distinct_targets(cls, values):
-        if len({v.component_name for v in values}) != len(values) or any(not v.component_name.strip() for v in values):
+        if len({(v.round,v.component_name) for v in values}) != len(values) or any(not v.component_name.strip() for v in values):
             raise ValueError("Choose distinct, nonempty component names")
+        if any(a.component_name == b.component_name and (a.round is None or b.round is None)
+               for i,a in enumerate(values) for b in values[i+1:]):
+            raise ValueError("Do not mix unscoped and round-specific modifiers for the same component")
         return values
 
     @field_validator("component_names")
@@ -120,32 +149,54 @@ def save_preferences(store, preferences):
     return get_preferences(store)
 
 
-def choose_components(detail, names):
+def choose_components(detail, names, choices=None):
     groups, used, issues, extra = [], set(), [], 0
+    live_rounds = [g["round"] for g in detail["groups"]]
+    if len(set(live_rounds)) != len(live_rounds):
+        return [], None, [{"reason":"duplicate_live_component_round"}]
+    if choices is None:
+        ambiguous = [name for name in names if sum(c["name"] == name
+            for g in detail["groups"] for c in g["choices"]) > 1]
+        if ambiguous:
+            return [], None, [{"reason":"preferred_component_name_ambiguous_use_round_choices", "names":ambiguous}]
+    else:
+        unknown = sorted({c.round for c in choices} - set(live_rounds))
+        if unknown:
+            issues.append({"reason":"preferred_component_round_not_found", "rounds":unknown})
     for group in detail["groups"]:
         all_choices = group["choices"]
-        wanted = [c for c in all_choices if c["name"] in names]
+        wanted = [(c,1) for c in all_choices if c["name"] in names] if choices is None else []
+        if choices is not None:
+            for preference in (c for c in choices if c.round == group["round"]):
+                matches = [c for c in all_choices if c["name"] == preference.name]
+                if len(matches) != 1:
+                    issues.append({"reason":"preferred_component_missing_or_ambiguous_in_round",
+                                   "round":group["round"], "name":preference.name})
+                else:
+                    wanted.append((matches[0],preference.quantity))
         candidates = [c for c in all_choices if c["available"] and c["standard_configuration_supported"]]
         if wanted:
             chosen = wanted
-            used.update(c["name"] for c in chosen)
+            used.update(c["name"] for c,q in chosen)
         elif len(all_choices) == 1 and group["min_quantity"] == group["max_quantity"] == 1:
-            chosen = all_choices
+            chosen = [(all_choices[0],1)]
         elif group["min_quantity"] == 0:
             chosen = []
         else:
             issues.append({"reason": "component_choice_required", "round": group["round"],
                            "group": group["name"], "choices": all_choices})
             continue
-        if (not group["min_quantity"] <= len(chosen) <= group["max_quantity"]
-                or any(c not in candidates for c in chosen)
-                or len({c["product_code"] for c in chosen}) != len(chosen)):
+        if (not group["min_quantity"] <= sum(q for c,q in chosen) <= group["max_quantity"]
+                or any(c not in candidates for c,q in chosen)
+                or len({c["product_code"] for c,q in chosen}) != len(chosen)
+                or any(type(c.get("max_quantity",-1)) is not int or c.get("max_quantity",-1) < -1
+                       or c.get("max_quantity",-1) != -1 and q > c["max_quantity"] for c,q in chosen)):
             issues.append({"reason": "preferred_component_unavailable_or_unsupported", "round": group["round"],
                            "choices": all_choices})
             continue
-        groups.append({"round": group["round"], "items": [{"product_code": c["product_code"], "quantity": 1} for c in chosen]})
+        groups.append({"round": group["round"], "items": [{"product_code": c["product_code"], "quantity": q} for c,q in chosen]})
         if extra is not None:
-            extra = extra + sum(cents(c["extra_cny"]) for c in chosen) if all(c["extra_cny"] is not None for c in chosen) else None
+            extra = extra + sum(cents(c["extra_cny"])*q for c,q in chosen) if all(c["extra_cny"] is not None for c,q in chosen) else None
     missing = set(names) - used
     if missing:
         issues.append({"reason": "preferred_components_not_found", "names": sorted(missing)})
@@ -212,11 +263,12 @@ def apply_preferred_modifiers(detail, preference, groups):
         problems.append({"reason": "use_component_modifiers_for_combo_ingredients"})
     else:
         modifiers, problems = resolve_modifiers(detail.get("modifiers"), preference.modifiers)
-    chosen = [(selection, choice) for group in groups for selection in group["items"]
+    chosen = [(group["round"], selection, choice) for group in groups for selection in group["items"]
               for source in detail["groups"] if source["round"] == group["round"]
               for choice in source["choices"] if choice["product_code"] == selection["product_code"]]
     for target in preference.component_modifiers:
-        matches = [(selection, choice) for selection, choice in chosen if choice["name"] == target.component_name]
+        matches = [(selection, choice) for round_number, selection, choice in chosen if choice["name"] == target.component_name
+                   and (target.round is None or round_number == target.round)]
         if len(matches) != 1:
             problems.append({"reason": "preferred_ingredient_component_not_selected_or_ambiguous", "name": target.component_name})
             continue
@@ -386,11 +438,12 @@ def plan_meal(service, account=None, date=None):
         detail = (provider.product_detail(request, offer["product_code"], offer["offer_id"], variant_of=variant_of) if variant_of else
                   provider.product_detail(request, offer["product_code"], offer["offer_id"], coupon_ref) if coupon_ref else
                   provider.product_detail(request, offer["product_code"], offer["offer_id"]))
-        groups, extra, problems = choose_components(detail, preference.component_names)
+        groups, extra, problems = choose_components(detail, preference.component_names, preference.component_choices)
         modifiers, modifier_problems = apply_preferred_modifiers(detail, preference, groups)
         problems.extend(modifier_problems)
         if detail.get("standard_configuration_supported") is False:
-            problems.append({"reason": "product_default_configuration_unsupported"})
+            problems.append({"reason": "product_default_configuration_unsupported",
+                             "configuration_issues": detail.get("configuration_issues", [])})
         if problems or type(detail.get("max_quantity")) is not int or preference.quantity > detail["max_quantity"]:
             issues.append({"reason": "product_configuration_required", "name": preference.name,
                            "details": problems, "max_quantity": detail.get("max_quantity")})
@@ -403,6 +456,8 @@ def plan_meal(service, account=None, date=None):
                              "variant_of": preference.variant_of,
                              **({"variant_specifications": preference.variant_specifications} if preference.variant_specifications else {}),
                              "quantity": preference.quantity, "components": preference.component_names,
+                             **({"component_choices": [c.model_dump() for c in preference.component_choices]}
+                                if preference.component_choices is not None else {}),
                              "modifiers": [m.model_dump(exclude_none=True) for m in preference.modifiers],
                              "component_modifiers": [m.model_dump(exclude_none=True) for m in preference.component_modifiers]})
         if estimate is not None:
