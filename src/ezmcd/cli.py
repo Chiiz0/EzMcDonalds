@@ -95,6 +95,9 @@ def main():
     status = commands.add_parser("status")
     status.add_argument("account")
     status.add_argument("attempt_id")
+    cart_status = commands.add_parser("cart-status", help="Query a recorded cart addition without sending it again; defaults to the latest")
+    cart_status.add_argument("account")
+    cart_status.add_argument("--operation-id")
     history = commands.add_parser("orders", help="Find this account's local purchase records without a login or network call")
     history.add_argument("account")
     history.add_argument("--date", dest="pickup_date", help="Pickup date YYYY-MM-DD in Asia/Shanghai")
@@ -225,6 +228,8 @@ def main():
             result = service.submit(args.account, args.quote_id, args.idempotency_key)
         elif args.command == "orders":
             result = service.orders(args.account, pickup_date=args.pickup_date, state=args.state, limit=args.limit, offset=args.offset)
+        elif args.command == "cart-status":
+            result = service.cart_add_status(args.account, args.operation_id)
         else:
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))

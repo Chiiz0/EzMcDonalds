@@ -107,26 +107,27 @@ def public_modifiers(product):
                         for v in g["values"]]} for i, g in enumerate(groups)]}
 
 
-def verify_modification(expected, actual):
-    """Stop if a server cart omitted/changed an explicitly submitted ingredient.
-
-    Modern carts may echo modification.values or normalize them to legacy
-    customization.options/items. Compare their code/key pairs, never display text.
-    """
-    wanted = expected.get("modification", {}).get("values")
-    if wanted is None:
-        return
+def configuration_keys(actual):
+    """Normalize supported free choices without trusting display labels."""
     try:
-        target = {v["code"]: v["key"] for v in wanted}
+        if actual.get("grills") or actual.get("biasChoices"):
+            raise ValueError
         representations = []
-        modern = (actual.get("modification") or {}).get("values")
+        modification = actual.get("modification") or {}
+        if not isinstance(modification, dict) or set(modification) - {"values"}:
+            raise ValueError
+        modern = modification.get("values")
         if modern is not None:
             if not isinstance(modern, list) or any(type(v.get("quantity")) is not int or v["quantity"] != 1 for v in modern):
                 raise ValueError
             representations.append(modern)
         legacy = actual.get("customization") or {}
+        if not isinstance(legacy, dict) or set(legacy) - {"options", "items"}:
+            raise ValueError
         options, items = legacy.get("options", []), legacy.get("items", [])
         if not isinstance(options, list) or not isinstance(items, list):
+            raise ValueError
+        if any("price" in v and (type(v["price"]) is not int or v["price"] != 0) for v in options):
             raise ValueError
         # Observed single-choice cart echo: group code/key identifies the choice;
         # one free selected value is nested inside the group, e.g. less ice.
@@ -139,10 +140,22 @@ def verify_modification(expected, actual):
         if options or items:
             representations.append(options + items)
         if not representations:
-            raise ValueError
+            return {}
+        choices = None
         for received in representations:
             got = {v["code"]: v["key"] for v in received}
-            if len(got) != len(received) or target != got:
+            if (len(got) != len(received) or any(not isinstance(code, str) or not re.fullmatch(r"[0-9]{1,20}", code)
+                    or not isinstance(key, str) or not re.fullmatch(r"[0-9]{1,4}-[0-9]{1,4}", key) for code, key in got.items())
+                    or choices is not None and choices != got):
                 raise ValueError
+            choices = got
+        return choices
     except (AttributeError, TypeError, ValueError, KeyError):
         raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart") from None
+
+
+def verify_modification(expected, actual):
+    """Stop when the server changes an explicitly submitted ingredient."""
+    wanted = expected.get("modification", {}).get("values")
+    if wanted is not None and configuration_keys(actual) != {v["code"]: v["key"] for v in wanted}:
+        raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart")

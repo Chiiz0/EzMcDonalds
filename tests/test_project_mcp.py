@@ -27,6 +27,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("checkout_submit", names)
                 self.assertIn("product_detail", names)
                 self.assertIn("cart_add_configured", names)
+                self.assertTrue(next(t for t in tools if t.name == "cart_add_status").annotations.read_only_hint)
                 self.assertTrue(next(t for t in tools if t.name == "cart_clear").annotations.destructive_hint)
                 self.assertIn("account_refresh", names)
                 self.assertIn("account_runtime_check", names)
@@ -83,6 +84,10 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 added = json.loads((await client.call_tool("cart_add_configured", {"request": request,
                     "items": [{"product_code": "100001", "quantity": 1}], "idempotency_key": "mcp-cart"})).content[0].text)
                 self.assertFalse(added["order_created"])
+                self.assertEqual(added["state"], "MATCHED")
+                recovered_cart = json.loads((await client.call_tool("cart_add_status", {"account": "demo"})).content[0].text)
+                self.assertEqual(recovered_cart["operation_id"], added["operation_id"])
+                self.assertTrue(recovered_cart["cart_matches_requested"])
                 repeated_clear = json.loads((await client.call_tool("cart_clear", clear_args)).content[0].text)
                 self.assertFalse(repeated_clear["cart_empty"])
                 self.assertFalse(repeated_clear["clear_attempted"])
@@ -100,6 +105,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             from ezmcd.models import Policy
             Service(store).set_policy("demo", Policy())
             async with Client(params) as client:
+                recovered_cart = json.loads((await client.call_tool("cart_add_status", {"account": "demo"})).content[0].text)
+                self.assertEqual(recovered_cart["operation_id"], added["operation_id"])
+                self.assertFalse(recovered_cart["add_attempted"])
                 found = json.loads((await client.call_tool("orders_list", {
                     "account": "demo", "pickup_date": pickup.date().isoformat()})).content[0].text)
                 self.assertEqual(found["total"], 1)

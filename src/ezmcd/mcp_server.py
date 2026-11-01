@@ -38,6 +38,7 @@ def build_server(service):
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
         "To change a nonempty cart, inspect cart_get and use its short-lived cart_ref with cart_clear only when the user wants those items removed. "
+        "After cart addition, only MATCHED suggests a fresh quote. On a lost reply or restart use cart_add_status; never switch keys to repeat an unresolved addition. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
         "Use a stable idempotency key per user purchase. "
         "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
@@ -59,6 +60,7 @@ def build_server(service):
             "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
             "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks; ordinary coupon payment unverified",
             "cart_changes": "cart_get/cart_add return a 120-second member/store/time-bound reference; explicit cart_clear rechecks the complete cart and sends once; repeats only query; real clear and repeat verified, no cross-client atomic lock",
+            "cart_recovery": "draft and input bound before sending; same-key calls only compare the current cart; cart_add_status recovers a specific or latest recorded addition after restart; real coffee cart verified with locally injected lost reply/readback; pre-a14 records cannot be reconstructed",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; one reused-context order POST/payment accepted, cross-day validity unverified",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
             "local_guarded_capture": "Mac CLI sampling-capture only; requires local certificate and manual official App operation; blocks order requests before upstream, restores proxy after App closes; does not import automatically or enable spending; real no-order sampling verified",
@@ -218,16 +220,22 @@ def build_server(service):
         """Remove ALL items from the inspected cart only when the user wants to change/remove them. Requires a fresh cart_get/cart_add cart_ref and stable key; rechecks the complete cart before one PUT. Repeated calls only query. Never cancels orders, consumes coupons or pays. Do not edit concurrently in the official App."""
         return service.clear_cart(request, cart_ref, idempotency_key)
 
+    @server.tool(annotations=READ)
+    @protected
+    def cart_add_status(account: str, operation_id: str | None = None) -> dict:
+        """Recover a cart addition using its operation_id, or the latest recorded addition if omitted. Uses saved request and choices to compare the CURRENT cart; never rebuilds the draft or resends a write. MATCHED permits a fresh quote only. EMPTY, DIFFERENT and UNAVAILABLE require review; they do not authorize retrying. Local intent remains visible after login expiry/revocation. Pre-a14 write-only records cannot be reconstructed."""
+        return service.cart_add_status(account, operation_id)
+
     @server.tool(annotations=CART)
     @protected
     def cart_add_simple(request: CheckoutInput, items: list[ItemSelection], idempotency_key: str) -> dict:
-        """Add simple uncustomized menu items to an empty cart once. No order/payment; complex combos require official App configuration."""
+        """Add simple uncustomized menu items to an empty cart once. Same key only queries the original request; changed input with that key is rejected. Inspect state and only proceed to a fresh quote when MATCHED. Never orders or pays."""
         return service.add_simple_items(request, items, idempotency_key)
 
     @server.tool(annotations=CART)
     @protected
     def cart_add_configured(request: CheckoutInput, items: list[ItemSelection], idempotency_key: str) -> dict:
-        """Add selected items/combos to an EMPTY cart once. Use live offer_id, optional coupon_ref, and explicit round/items choices from product_detail. Rechecks coupon availability and verifies its cart echo. Does not order or pay; call checkout_quote next."""
+        """Add selected items/combos to an EMPTY cart once. Use live offer_id, optional coupon_ref, and explicit choices from product_detail. Save a stable key: repeated calls only reconcile the original draft. Check state: MATCHED permits a fresh quote; EMPTY/DIFFERENT/UNAVAILABLE require review, not replacement or retry. Never orders or pays."""
         return service.add_configured_items(request, items, idempotency_key)
 
     @server.tool(annotations=READ)

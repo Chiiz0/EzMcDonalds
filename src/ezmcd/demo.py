@@ -118,11 +118,13 @@ class DemoProvider:
         return checkout(args, cart, conf, "2")
 
     def cart(self, args):
-        if not self.read()["cart_quantity"]:
-            self.store(args.store_code)
-            return {"simulation": True, "items": [], "store_code": args.store_code, "pickup_at": args.pickup_at}
-        q = self.quote(args)
-        return {"simulation": True, "items": q["items"], "store_code": args.store_code, "pickup_at": args.pickup_at}
+        self.store(args.store_code)
+        if pickup_time(args.pickup_at) <= datetime.now(timezone.utc):
+            raise EzMcdError("pickup_time_has_passed")
+        quantity = self.read()["cart_quantity"]
+        items = [{"product_code": "100001", "product_type": "1", "name": "演示汉堡", "quantity": quantity,
+                  "components": [], "configuration": {}, "coupon_fingerprint": None, "amount_cents": quantity * 1000}] if quantity else []
+        return {"simulation": True, "items": items, "store_code": args.store_code, "pickup_at": args.pickup_at}
 
     def cart_state(self, args):
         cart = self.cart(args)
@@ -136,11 +138,13 @@ class DemoProvider:
             raise EzMcdError("demo_has_no_coupons")
         if len(selections) != 1 or selections[0].product_code != "100001":
             raise EzMcdError("demo_requires_one_demo_product")
-        return {"quantity": selections[0].quantity}
+        if self.read()["cart_quantity"]:
+            raise EzMcdError("cart_not_empty_review_before_clear")
+        return {"products": [{"code": "100001", "type": "1", "quantity": selections[0].quantity}]}
 
     def write_cart(self, body):
         state = self.read()
-        state["cart_quantity"] = body["quantity"]
+        state["cart_quantity"] = body["quantity"] if "quantity" in body else body["products"][0]["quantity"]
         write_private(self.path, state)
         return {"http_status": 200, "response": {"success": True, "data": {}}}
 

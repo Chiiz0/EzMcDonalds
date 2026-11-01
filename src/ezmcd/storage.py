@@ -83,6 +83,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS cart_snapshots(id TEXT PRIMARY KEY, identity TEXT NOT NULL,
                 scope TEXT NOT NULL, digest TEXT NOT NULL, expires REAL NOT NULL,
                 clear_key TEXT, confirmed INTEGER NOT NULL DEFAULT 0, UNIQUE(identity, clear_key));
+            CREATE TABLE IF NOT EXISTS cart_additions(id TEXT PRIMARY KEY, identity TEXT NOT NULL,
+                scope TEXT NOT NULL, request_digest TEXT NOT NULL, created REAL NOT NULL,
+                closed INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
             """)
 
     @contextmanager
@@ -183,6 +186,43 @@ class Store:
         with self.connect() as conn:
             conn.execute("UPDATE cart_snapshots SET confirmed=1 WHERE id=? AND identity=? AND clear_key IS NOT NULL",
                          (ref, identity))
+            conn.execute("UPDATE cart_additions SET closed=1 WHERE identity=? AND scope IN "
+                         "(SELECT scope FROM cart_snapshots WHERE id=? AND identity=? AND confirmed=1)",
+                         (identity, ref, identity))
+
+    def cart_addition(self, identity, operation_id=None):
+        with self.connect() as conn:
+            if operation_id is None:
+                row = conn.execute("SELECT * FROM cart_additions WHERE identity=? ORDER BY created DESC,rowid DESC LIMIT 1",
+                                   (identity,)).fetchone()
+            else:
+                row = conn.execute("SELECT * FROM cart_additions WHERE id=? AND identity=?", (operation_id, identity)).fetchone()
+        return None if row is None else json.loads(row["data"]) | {"closed": bool(row["closed"])}
+
+    def pending_cart_addition(self, identity):
+        with self.connect() as conn:
+            return conn.execute("SELECT id FROM cart_additions WHERE identity=? AND closed=0 LIMIT 1", (identity,)).fetchone() is not None
+
+    def write_claimed(self, operation_id, stage):
+        with self.connect() as conn:
+            return conn.execute("SELECT 1 FROM writes WHERE attempt=? AND stage=?", (operation_id, stage)).fetchone() is not None
+
+    def claim_cart_addition(self, identity, record):
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            if conn.execute("SELECT 1 FROM cart_additions WHERE identity=? AND closed=0", (identity,)).fetchone():
+                raise EzMcdError("cart_addition_unresolved_query_status")
+            try:
+                conn.execute("INSERT INTO cart_additions VALUES (?,?,?,?,?,0,?)", (record["operation_id"], identity,
+                    canonical(record["scope"]), record["request_digest"], record["created_at"], canonical(record)))
+                conn.execute("INSERT INTO writes VALUES (?,?,?,NULL)", (record["operation_id"], "cart", record["created_at"]))
+            except sqlite3.IntegrityError:
+                raise EzMcdError("write_already_attempted_query_only") from None
+
+    def update_cart_addition(self, identity, record, *, matched=False):
+        with self.connect() as conn:
+            conn.execute("UPDATE cart_additions SET data=?, closed=CASE WHEN ? THEN 1 ELSE closed END WHERE id=? AND identity=?",
+                         (canonical(record), matched, record["operation_id"], identity))
 
     def quote(self, identity, quote_id):
         with self.connect() as conn:

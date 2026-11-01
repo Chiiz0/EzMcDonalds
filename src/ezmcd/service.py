@@ -6,7 +6,7 @@ import uuid
 
 from .accounts import public_account
 from .errors import EzMcdError
-from .models import CheckoutInput, ItemSelection, Policy, cents, pickup_time, yuan, fingerprint
+from .models import CheckoutInput, ItemSelection, Policy, cents, pickup_time, yuan
 from .provider import McdProvider
 from .transport import data
 
@@ -189,21 +189,12 @@ class Service:
         return self._add_items(args, items, request_key, configured=True)
 
     def _add_items(self, args, items, request_key, *, configured):
-        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_key):
-            raise EzMcdError("invalid_idempotency_key")
-        account, provider = self.provider(args.account)
-        op = "cart-" + fingerprint({"identity": account["identity"], "key": request_key})
-        with self.store.lock(account["identity"]):
-            draft = (provider.configured_cart_draft if configured else provider.simple_cart_draft)(args, items)
-            self.store.claim(op, "cart")
-            result = provider.write_cart(draft)
-            self.store.receipt(op, "cart", result)
-            data(result)
-            cart = self._cart_snapshot(account, provider, args)
-            if configured:
-                from .products import verify_configured_cart
-                verify_configured_cart(draft, cart)
-            return cart | {"order_created": False}
+        from .cart import CartAdditions
+        return CartAdditions(self).add(args, items, request_key, configured=configured)
+
+    def cart_add_status(self, alias, operation_id=None):
+        from .cart import CartAdditions
+        return CartAdditions(self).status(alias, operation_id)
 
     def submit(self, alias, quote_id, request_key):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_key):

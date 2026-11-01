@@ -8,6 +8,10 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "cart_key_reused_for_different_request": ("同一加购幂等键对应了不同的请求。", "用 cart_add_status 查原操作；不要修改商品、门店、时段或预算后沿用原键。"),
+        "cart_addition_unresolved_query_status": ("本账号有尚未核对完成的加购。", "先 cart_add_status 找回原请求；不换键重加。若用户决定重新选餐，检查对应时段购物车并明确清空后再准备新请求。"),
+        "legacy_cart_write_query_only": ("旧版已尝试这个加购，但没有可恢复的完整草稿。", "只用 cart_get 查看现有餐品；不重发旧操作，也不根据回执猜测原选择。"),
+        "cart_addition_not_found_for_account": ("该账号没有这条可恢复的加购记录。", "省略 operation_id 查询最新记录；旧版记录和官方 App 的操作需直接查看购物车。"),
         "cart_not_empty_review_before_clear": ("购物车已有餐品。", "先用 cart_get 查看；可直接报价，或在用户确实要改餐时携带其 cart_ref 调用 cart_clear，再重新加购。"),
         "cart_changed_review_before_clear": ("购物车内容或金额已变化，本次没有清空。", "重新 cart_get，让用户核对当前餐品；不要自动用新引用重复清空。"),
         "cart_snapshot_expired_or_already_used": ("购物车引用已过期或已用于清空。", "原请求用相同引用和幂等键只能查询；新改餐意图先 cart_get 重新查看。"),

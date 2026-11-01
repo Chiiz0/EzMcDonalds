@@ -4,9 +4,9 @@ No client-provided price, coupon, customization blob or upstream identifier is
 trusted. Advanced customization continues to use the configured official cart.
 """
 from .errors import EzMcdError
-from .models import yuan
-from .modifiers import public_modifiers, selected_modification, verify_modification
-from .coupons import coupon_fields, verify_coupon_cart
+from .models import yuan, canonical
+from .modifiers import public_modifiers, selected_modification, verify_modification, configuration_keys
+from .coupons import coupon_fields, verify_coupon_cart, coupon_signature
 
 
 def choose_offer(menu, product_code, offer_id=None):
@@ -84,6 +84,56 @@ def verify_configured_cart(draft, cart):
                 if len(actual_groups) != 1 or len(actual) != 1 or actual[0].get("quantity") != part["quantity"]:
                     raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart")
                 verify_modification(part, actual[0])
+
+
+def verify_cart_contents(draft, cart):
+    """Compare all requested items, including plain items and default modifiers.
+
+    Rows with identical choices may be merged by the server; compare total
+    quantities per exact configuration. Prices still require a fresh quote.
+    """
+    def quantity(value):
+        if type(value) is not int or value <= 0:
+            raise ValueError
+        return value
+
+    def components(groups):
+        rounds = {}
+        for group in groups:
+            number = group["round"]
+            if type(number) is not int or number in rounds:
+                raise ValueError
+            parts = {}
+            for part in group.get("comboProducts", []):
+                key = canonical({"code": str(part["code"]), "modifiers": configuration_keys(part)})
+                parts[key] = parts.get(key, 0) + quantity(part["quantity"])
+            # An explicitly empty optional round may be omitted by the server.
+            rounds[number] = parts
+        return {str(k): v for k, v in rounds.items() if v}
+
+    def rows(products, *, requested):
+        result = {}
+        for p in products:
+            if requested:
+                coupon = (coupon_signature({"id": p["couponId"], "code": p["couponCode"],
+                    "promotionId": p["promotionId"], "rightCardId": p.get("cardId")}) if p.get("couponId") else None)
+            else:
+                coupon = p.get("coupon_fingerprint")
+            key = canonical({"code": str(p["code"] if requested else p["product_code"]),
+                "type": str(p["type"] if requested else p["product_type"]), "coupon": coupon,
+                "modifiers": configuration_keys(p if requested else p.get("configuration", {})),
+                "components": components(p.get("comboItems", []) if requested else p.get("components", []))})
+            result[key] = result.get(key, 0) + quantity(p["quantity"])
+        return result
+
+    try:
+        wanted = draft["products"]
+        if not isinstance(wanted, list) or not wanted or not isinstance(cart["items"], list):
+            raise ValueError
+        if rows(wanted, requested=True) != rows(cart["items"], requested=False):
+            raise ValueError
+    except (EzMcdError, AttributeError, KeyError, TypeError, ValueError):
+        raise EzMcdError("cart_contents_do_not_match_requested_items") from None
 
 
 def public_detail(detail, offer):

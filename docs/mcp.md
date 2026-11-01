@@ -49,6 +49,7 @@
 | `cart_add_configured` | 按实时详情选择组件、单品、卡优惠或支持的单品券 | 改空购物车，需幂等键 |
 | `cart_get` | 已配置购物车及120秒 cart_ref | 外部只读，本机保存引用 |
 | `cart_clear` | 清空用户要移除的整份购物车 | 改购物车；需新鲜引用与幂等键，重复只查询 |
+| `cart_add_status` | 找回指定或最新加购，并核对当前车 | 外部只读；本机记录核对结果，不重发 |
 | `cart_add_simple` | 空购物车加普通无规格单品 | 改购物车，需幂等键 |
 | `checkout_quote` | 明细、优惠、上限、钱包缺口及下单阻碍 | 外部只读，本机保存报价 |
 | `checkout_submit` | 下单＋麦钱包付款＋核对 | **真实消费**，受策略限制 |
@@ -59,6 +60,8 @@
 [工具行为注解](https://py.sdk.modelcontextprotocol.io/servers/tools/)用于提示客户端，不代替本机策略和持久化去重。
 
 需要重新选餐时，先 `cart_get` 查看原内容，再按用户改餐意图用同一请求、`cart_ref` 与稳定键调用 `cart_clear`。确认空车后重新加购并报价。清空不会取消订单；不与官方 App 并发改车。[购物车改餐与重复调用](cart.md)。
+
+加购工具现在返回 `operation_id` 和 `state`。只有 `MATCHED` 才建议获取新报价；`EMPTY`、`DIFFERENT`、`UNAVAILABLE` 都不是换键重试的理由。断线或重启后用 `cart_add_status(account, operation_id?)` 恢复，省略引用时查询该会员最新记录。重复原加购请求只读取当前车并比较原草稿；当前车已被移除也不会自动补加。
 
 账号刷新及重复调用规则见[会话维护](session-maintenance.md)。`readiness` 区分可浏览与下单前置条件，不替代实时订单检查。
 
