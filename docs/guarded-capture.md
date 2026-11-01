@@ -1,0 +1,64 @@
+# 不创建订单的本机运行字段采样
+
+已经接入的 Mac 用户可以运行 `sampling-capture`，在官方 App 发送订单前截取并阻断请求，更新自己的下单运行字段。无需为了取得样本购买一单。当前适配指定的官方客户端构建；它仍需要人在官方 App 操作，不是跨日自动续期。
+
+## 准备
+
+采样附加组件需要 Python 3.12+，核心查询与 MCP 仍支持 Python 3.11。项目目录中安装：
+
+```sh
+.venv/bin/python -m pip install -e '.[sampling]'
+.venv/bin/ezmcd sampling-cert install
+.venv/bin/ezmcd sampling-cert status
+```
+
+首次证书安装需要在 macOS 完成授权，后续复用，不在每轮移除。所有命令须使用同一数据目录；自定义目录时给每条命令加 `--data-dir /absolute/path/data`。
+
+先在官方 App 登录目标会员，准备一份可以进入确认页的购物车，然后退出 App。只加购物车，不提交订单；记录测试前的订单和余额。正常退出卡住时，在活动监视器中只强制退出 `McdApp`。已有连接必须关闭，不能让 App 保持运行后才启用代理。当前命令要求这个会员已有本地别名；首次接入仍按[凭据指南](credentials.md)处理。
+
+## 开始采样
+
+```sh
+.venv/bin/ezmcd sampling-capture personal --network-service Wi-Fi
+```
+
+`--network-service` 是 macOS 的当前联网服务名。命令先检查持久证书、App 已退出和原代理状态，再做一次合成阻断测试。已有 HTTP、HTTPS、SOCKS 或自动代理时停止；不会覆盖活动代理。必要时用 `--mitmdump /absolute/path/mitmdump` 指定自己安装的程序。
+
+只有看到 `GUARD_ACTIVE` 后才打开官方 App：
+
+1. 先进入麦当劳钱包的余额页。终端出现 `BALANCE_CAPTURED`，表示已通过签名和会员身份校验。余额尚未校验时先不要进入提交操作。
+2. 打开已准备购物车对应的门店和取餐时间，进入订单确认页。
+3. 在这一个保护窗口中触发一次提交；若 App 再确认餐厅，只确认一次。订单请求会在请求头阶段终止，App 可能显示“提交失败”。不要重试。
+4. 看到 `CLOSE_OFFICIAL_APP_NOW` 后立即退出 App；卡住时只强制退出麦当劳。采样器会一直保留阻断，直到确认 App 进程结束，才恢复原 HTTPS 代理并退出。
+5. 等待 `CLEANUP_RESULT` 中 `proxy_restored=true`、无错误。证书保留。恢复正常连接后核对官方订单和余额，清除本轮测试购物车。
+
+默认采样120秒，`--seconds` 可设30至120秒。超时后停止读取和收集，但继续阻断，不能靠超时自动放行客户端的重试。命令不打开 App、不自动点击、不创建购物车、不生成账号授权、不修改消费策略；采样期间锁住本地账号，防止同一数据目录的 MCP 同时购买。
+
+系统 HTTPS 代理会在这段时间临时指向本机。只解密 `api.mcd.cn`；其他 HTTPS 隧道（包括钱包支付主机）被阻止，其他软件联网可能暂时受影响。订单、购物车写入、预支付及消费请求不转发。官方原生会话刷新可放行至多一次，且必须与本地账号或 `--refresh-from` 指定的本人签名余额样本的 `sid` 和 `token` 完全匹配；结果未知不重发。其余 POST 等写请求继续阻断。
+
+## 导入结果
+
+成功输出包含 `balance_sample` 与 `runtime_sample` 的本机绝对路径。采样本身不覆盖账号；确认无新增订单、余额未变化并清理草稿后，用输出路径替换下面占位值：
+
+```sh
+.venv/bin/ezmcd account connect personal --update \
+  --balance-sample /absolute/path/capture/balance.json \
+  --runtime-sample /absolute/path/capture/runtime.json
+.venv/bin/ezmcd account check personal
+.venv/bin/ezmcd account runtime-check personal
+```
+
+导入只重新查询余额、验证同会员身份、校验官方签名，不重放订单正文；保留消费策略和订单日志。若 App 与原短信登录会话不同，会替换为当前 App 会话，不保留旧会话的刷新令牌；之后需要时重新短信登录或采样。运行字段仍保留真实观察时间，当前24小时限制不变。
+
+样本存于数据目录的 `captures/<随机编号>`，目录0700、文件0600；只保留必要请求头、校验结果和脱敏审计，不保存订单正文、Cookie、完整余额响应或原始代理日志。样本仍包含登录凭据，不要上传仓库或发给 Agent。导入成功后可在本机删除不再需要的采样目录；不要删除账号数据目录中的购买日志。
+
+## 未完成与恢复
+
+- `balance_saved=false`：查看输出的缺失字段名称。曾实测原生刷新被阻断后缺少 `meddyid`；不要手工补字段。如果已经取得同会员的近期有效余额样本，可用 `--refresh-from /absolute/path/balance.json` 为下一轮匹配官方刷新。不同会话不能随意混用。
+- `runtime_saved=false`：本轮没有通过运行样本校验，命令退出码为2。先完成 App 退出和代理恢复，不把空结果当成可下单状态。
+- `sampling_effective_proxy_mismatch`：所选联网服务未使代理生效；不会发出可开始操作的指令。
+- 清理报错、终端被强制结束或电脑重启：先关闭麦当劳，再根据本轮 `proxy-before.json` 在系统设置恢复该网络服务原 HTTPS 代理。不要在 App 仍等待重试时直接关代理。持久证书按原授权保留；停用时运行 `sampling-cert remove`。
+
+## 验收范围
+
+采样核心已在支持的官方 App 完成真实余额请求、发送前订单阻断、运行签名校验和新签名的只读 GET 核验；独立查询确认订单列表与钱包余额未变化，测试购物车已清理。合成 TLS 测试确认订单、预支付和购物车请求不触达上游，钱包隧道被阻断。不是一次新的支付验收，也不证明跨日无人值守或其他客户端构建可用。

@@ -59,6 +59,7 @@ def build_server(service):
             "coupon_configuration": "fresh references scoped to account/store/time; ordinary single-product coupons can be drafted and their cart echo must match; new coupon writes/payments not yet accepted",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; one reused-context order POST/payment accepted, cross-day validity unverified",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
+            "local_guarded_capture": "Mac CLI sampling-capture only; requires local certificate and manual official App operation; blocks order requests before upstream, restores proxy after App closes; does not import automatically or enable spending; real no-order sampling verified",
             "local_request_import": "CLI only: copy one signed balance request as cURL/raw HTTP, then connect --clipboard on Mac or --request-file; validates signature and live balance, never executes copied commands; runtime supports the same text sources and discards the order body",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",

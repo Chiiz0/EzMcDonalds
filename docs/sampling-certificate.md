@@ -31,7 +31,7 @@ ezmcd sampling-cert status
 
 该目录包含 mitmproxy 需要的 `mitmproxy-ca.pem` 与 `mitmproxy-ca-cert.pem`。将本人调试工具的 `confdir` 指向这个目录，并把 HTTPS 查看范围限制到 `api.mcd.cn:443`。格式和加载方式见 [mitmproxy 自定义 CA 文档](https://docs.mitmproxy.org/stable/concepts/certificates/#using-a-custom-certificate-authority)。其他工具的 CA 导入方式需独立确认。
 
-证书本身不会阻止订单，也不会完成采样。余额导入和下单请求的发送前断点仍遵循[凭据指引](credentials.md)。完整官方 App 的无订单运行字段采集仍在联调；不能仅凭安装了证书就认为下单请求已被拦截。取得请求后先终止请求并关闭 App，再恢复代理。
+证书本身不会阻止订单，也不会完成采样。已有账号可使用[无订单采样命令](guarded-capture.md)，采样核心已完成官方 App 实机验证；也可按[凭据指引](credentials.md)设置发送前断点。不能仅凭安装证书就认为请求已被拦截。取得请求后先终止请求并关闭 App，再恢复代理。
 
 项目内的采样实现可在 `SamplingCertificate.lease()` 内使用此目录：它检查实际信任，并在采样期间阻止并发撤销。外部调试工具需自行先停止采样，CLI 不会检测或关闭它们。
 

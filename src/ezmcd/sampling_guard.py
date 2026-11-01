@@ -1,0 +1,218 @@
+"""Experimental request-side runtime capture. No proxy/trust changes here.
+
+Blocks financial/cart mutations before body forwarding, including retries.
+An allowlist of API GETs and an optional single matching session refresh pass.
+Expiry stops collection/read forwarding but keeps the block in place until the
+official App has been closed and the operator explicitly removes the proxy.
+"""
+from pathlib import Path
+import json
+import re
+import time
+from urllib.parse import urlsplit
+
+from ezmcd.accounts import profile_from_balance_sample, runtime_from_sample
+from ezmcd.models import fingerprint
+from ezmcd.errors import EzMcdError
+from ezmcd.storage import write_private
+
+BALANCE = '/bff/member/mwallet/balance'
+ORDER = '/bff/order/orders'
+REFRESH = '/bff/passport/login/session/refresh'
+HEADER_NAMES = {'ct','v','language','sv','sid','token','meddyid','routingid','tid','d',
+                'p','x-mcd-gw-v','authorization','x-hmac-digest'}
+READS = {BALANCE, ORDER, '/bff/order/confirmation/info', '/bff/cart/carts',
+         '/bff/spc/menu', '/bff/store/stores/collection/list', '/bff/promotion/coupons/rightCards',
+         '/bff/promotion/coupons/menu/available', '/bff/promotion/coupons/products',
+         '/bff/store/stores','/bff/store/cities','/bff/store/cities/group','/bff/store/stores/vicinity',
+         '/bff/member/user/portal/info','/bff/member/user/portal/v2','/bff/member/user/portal/v3',
+         '/bff/member/user/config/get','/bff/order/confirmation/pageconfig'}
+# Observed official startup/navigation GETs. No wildcard or mutation exemption.
+READS.update({'/bff/member/store/collection', '/bff/common/normal/config',
+              '/bff/common/normal/ab/experiments', '/bff/common/normal/share',
+              '/bff/portal/account/center/base', '/bff/portal/home/index',
+              '/bff/portal/home/index/user', '/bff/portal/home/orderinfo',
+              '/bff/portal/home/splash', '/bff/portal/version/upgrade'})
+READS.update({'/bff/store/stores/portal/base','/bff/store/stores/hottags'})
+READS.update({'/bff/order/confirmation/validationinfo', '/bff/order/confirmation/carts',
+              '/bff/order/confirmation/heartcard', '/bff/order/confirmation/promotion',
+              '/bff/order/confirmation/rightcard', '/bff/order/confirmation/agreement',
+              '/bff/promotion/coupons/card','/bff/spc/menu/campaign','/bff/spc/frequent'})
+
+
+class RuntimeGuard:
+    def __init__(self, config, *, clock=time.time):
+        self.output = Path(config['output'])
+        self.binary = config['binary']
+        self.identity = config['identity']
+        self.deadline = config['deadline']
+        self.clock = clock
+        self.profile = None
+        self.refresh_session = config.get('refresh_session')
+        self.refresh_used = False
+        self.runtime_saved = False
+        self.audit = {'blocked_requests':0, 'allowed_gets':0, 'balance_saved':False,
+                      'runtime_saved':False, 'upstream_connections':0, 'last_result':'starting'}
+
+    def save_audit(self):
+        write_private(self.output/'audit.json', self.audit)
+
+    def running(self):
+        self.audit['last_result'] = 'ready'
+        self.save_audit()
+
+    @staticmethod
+    def block(flow, *, terminate=False):
+        from mitmproxy import http
+        # Must happen before any parsing, validation or disk I/O. A later
+        # exception must not turn an intercepted write into a forwarded request.
+        flow.request.stream = False
+        flow.response = http.Response.make(409,
+            b'{"success":false,"code":"EZMCD_CAPTURE_BLOCKED","message":"Local capture: request not sent"}',
+            {'content-type':'application/json','x-ezmcd-local-block':'1'})
+        flow.metadata['ezmcd_blocked'] = True
+        if terminate and flow.killable:
+            flow.kill()
+
+    def http_connect(self, flow):
+        # Only the API tunnel may pass. Other destinations, including wallets,
+        # are rejected without decrypting any of their traffic.
+        host = flow.request.host.lower()
+        if host != 'api.mcd.cn' or flow.request.port != 443:
+            self.block(flow)
+
+    def server_connect(self, data):
+        self.audit['upstream_connections'] += 1
+        self.save_audit()
+
+    def requestheaders(self, flow):
+        req = flow.request
+        # Terminate writes at the headers hook. Merely replacing the response
+        # can still enter the proxy's request-body streaming state machine.
+        refresh_candidate = (self.refresh_session and not self.refresh_used and
+            (req.scheme,req.host,req.port,req.method,req.path) == ('https','api.mcd.cn',443,'POST',REFRESH))
+        self.block(flow, terminate=req.method != 'GET' and not refresh_candidate)
+        path = urlsplit(req.path).path
+        live = self.clock() <= self.deadline
+        official = req.scheme == 'https' and req.host == 'api.mcd.cn' and req.port == 443
+        if refresh_candidate and live:
+            try:
+                headers=self.headers(req,{'sid','token'})
+                matching=(set(headers)=={'sid','token'} and fingerprint(headers)==self.refresh_session)
+                self.audit['refresh_session_matched']=matching
+                if matching:
+                    # Claim before forwarding; unknown outcomes are never retried.
+                    self.refresh_used=True
+                    self.audit['allowed_session_refreshes']=1
+                    self.save_audit()
+                    flow.response=None
+                    flow.metadata.pop('ezmcd_blocked',None)
+                    return
+            except Exception:
+                self.block(flow,terminate=True)
+                raise
+        safe_read = path in READS or re.fullmatch(r'/bff/store/stores/[0-9]{7}(?:/menu/reservationTimeOption)?', path)
+        safe_read = safe_read or re.fullmatch(r'/bff/order/orders/[A-Za-z0-9_-]{1,80}',path)
+        if official and live and req.method == 'GET' and safe_read:
+            req.stream = False
+            self.audit['allowed_gets'] += 1
+            self.save_audit()
+            flow.response = None
+            flow.metadata.pop('ezmcd_blocked', None)
+            return
+        self.block(flow, terminate=True)
+        self.audit['blocked_requests'] += 1
+        # Endpoint names only: omit queries and redact variable path segments.
+        route=re.sub(r'[A-Za-z0-9_-]{20,}|[0-9]{6,}','{id}',path)
+        if len(route)<160 and len(self.audit.setdefault('blocked_routes',{}))<100:
+            key=req.method+' '+route
+            self.audit['blocked_routes'][key]=self.audit['blocked_routes'].get(key,0)+1
+        self.audit['last_result'] = 'expired_blocking' if not live else 'blocked'
+        if official and live and req.method == 'POST' and req.path == ORDER and not self.runtime_saved:
+            try:
+                if self.profile is None:
+                    raise ValueError('balance_not_captured')
+                headers = self.headers(req, {'sid','token','x-mcd-sign'})
+                sample = {'request':{'method':'POST','host':'api.mcd.cn','path':ORDER,
+                                     'headers':headers,'body':''},'request_blocked_before_upstream':True}
+                runtime_from_sample(self.profile,sample,self.binary)
+                write_private(self.output/'runtime.json',sample)
+                self.runtime_saved = self.audit['runtime_saved'] = True
+                self.audit['last_result'] = 'runtime_captured_request_blocked'
+            except (ValueError, KeyError, TypeError, OSError) as error:
+                self.audit['last_result'] = 'runtime_rejected'
+            except Exception:
+                # Never render arbitrary exception/credential text into logs.
+                self.audit['last_result'] = 'runtime_rejected'
+        self.save_audit()
+
+    @staticmethod
+    def headers(req, names):
+        result = {}
+        for name in names:
+            values = req.headers.get_all(name)
+            if len(values)>1 or any(len(value)>16384 or any(ord(c)<32 for c in value) for value in values):
+                raise ValueError('invalid_headers')
+            if values and values[0]:
+                result[name] = values[0]
+        return result
+
+    def responseheaders(self, flow):
+        self.audit['response_header_events'] = self.audit.get('response_header_events',0)+1
+        if flow.metadata.get('ezmcd_blocked') or (
+                flow.request.host == 'api.mcd.cn' and flow.request.path == BALANCE):
+            flow.response.stream = False
+        self.save_audit()
+
+    def request(self, flow):
+        self.audit['complete_request_events'] = self.audit.get('complete_request_events',0)+1
+        self.save_audit()
+
+    def response(self, flow):
+        req = flow.request
+        if (req.host == 'api.mcd.cn' and req.path == REFRESH and req.method == 'POST'
+                and not flow.metadata.get('ezmcd_blocked')):
+            try:
+                payload=json.loads(flow.response.content)
+                self.audit['refresh_succeeded']=(flow.response.status_code==200 and payload.get('success') is True)
+            except (ValueError,TypeError,AttributeError):
+                self.audit['refresh_succeeded']=False
+            self.save_audit()
+            return
+        if (self.profile is not None or self.clock()>self.deadline or flow.metadata.get('ezmcd_blocked')
+                or (req.scheme,req.host,req.port,req.method,req.path) != ('https','api.mcd.cn',443,'GET',BALANCE)):
+            return
+        try:
+            # Presence/shape only; never persist actual session/device values.
+            self.audit['balance_header_checks'] = {
+                'missing': sorted(k for k in ('sid','token','meddyid','v','language')
+                                  if not req.headers.get(k)),
+                'ct_101': req.headers.get('ct') == '101',
+                'sv_v4': req.headers.get('sv') == 'v4',
+                'authorization_six_parts': len(req.headers.get('authorization','').split('#')) == 6,
+                'duplicates': sorted(k for k in HEADER_NAMES if len(req.headers.get_all(k)) > 1)}
+            if flow.response.status_code != 200 or len(flow.response.content or b'')>65536:
+                raise ValueError('balance_response_invalid')
+            payload = json.loads(flow.response.content)
+            if not isinstance(payload,dict) or payload.get('success') is not True:
+                raise ValueError('balance_not_successful')
+            # Keep only the necessary request headers. Discard account balance,
+            # response body, cookies and every request body.
+            sample = {'request':{'method':'GET','host':'api.mcd.cn','path':BALANCE,
+                      'headers':self.headers(req,HEADER_NAMES),'body':''},
+                      'response':{'status':200,'body':{'success':True}}}
+            profile = profile_from_balance_sample(sample,self.binary)
+            identity = fingerprint({'provider':'mcd-cn','member':profile['fields']['meddyId']})
+            if identity != self.identity:
+                raise ValueError('wrong_member')
+            write_private(self.output/'balance.json',sample)
+            self.profile = profile
+            self.audit['balance_saved'] = True
+            self.audit['last_result'] = 'balance_captured'
+        except Exception as error:
+            self.audit['last_result'] = 'balance_rejected'
+            known={'successful_balance_sample_required','official_session_headers_incomplete',
+                   'invalid_official_sample_signature','official_client_build_not_supported',
+                   'wrong_member','invalid_headers','balance_not_successful','balance_response_invalid'}
+            self.audit['balance_error'] = str(error) if str(error) in known else type(error).__name__
+        self.save_audit()

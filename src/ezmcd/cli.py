@@ -21,6 +21,12 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     certificate = commands.add_parser("sampling-cert", help="Manage an explicit local macOS sampling certificate; never enables a proxy")
     certificate.add_argument("certificate_action", choices=("prepare", "install", "status", "remove"))
+    sampling = commands.add_parser("sampling-capture", help="Explicit macOS request-side capture; blocks orders and restores proxy after McdApp closes")
+    sampling.add_argument("alias")
+    sampling.add_argument("--network-service", default="Wi-Fi")
+    sampling.add_argument("--seconds", type=int, default=120)
+    sampling.add_argument("--mitmdump", help="Path to your installed mitmdump; otherwise uses PATH")
+    sampling.add_argument("--refresh-from", help="Private recent signed balance sample for one matching native session refresh")
     account = commands.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("list")
     account.add_parser("guide", help="Show the local credentials setup guide without asking for secrets")
@@ -114,6 +120,10 @@ def main():
         if args.command == "sampling-cert":
             from .sampling_cert import SamplingCertificate
             result = getattr(SamplingCertificate(store), args.certificate_action)()
+        elif args.command == "sampling-capture":
+            from .sampling import RuntimeCapture
+            result = RuntimeCapture(store, args.alias, service=args.network_service, seconds=args.seconds,
+                mitmdump=args.mitmdump, refresh_from=args.refresh_from).run()
         elif args.command == "mcp-config":
             result = {"mcpServers": {"ezmcdonalds": {"command": sys.executable,
                 "args": ["-m", "ezmcd.mcp_server"], "env": {"EZMCD_DATA_DIR": str(store.root)}}}}
@@ -218,6 +228,8 @@ def main():
         else:
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
+        if args.command == "sampling-capture" and not result.get("runtime_saved"):
+            return 2
         if args.command == "account" and args.action == "login" and result.get("state") != "CONNECTED":
             return 2
     except EzMcdError as error:

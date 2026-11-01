@@ -8,6 +8,19 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "sampling_options_invalid": ("采样参数不正确。", "使用实际 macOS 网络服务名称；采样时长为30至120秒。"),
+        "sampling_cancelled_before_start": ("已在正式采样前取消。", "系统代理未启用；可以保持官方 App 关闭或正常使用。"),
+        "sampling_mitmproxy_required": ("未找到可执行的 mitmdump。", "使用 Python 3.12+ 安装项目的 sampling 额外依赖；或用 --mitmdump 指向本机已安装的程序。"),
+        "sampling_existing_proxy_requires_review": ("当前网络已有代理或不能完整恢复原配置。", "先在本机确认网络代理；采样器不会覆盖活动 HTTP、HTTPS、SOCKS 或自动代理配置。"),
+        "sampling_close_official_app_first": ("官方 App 仍在运行。", "先退出麦当劳清除旧连接；若正常退出卡住，只强制退出麦当劳，再启动采样。"),
+        "sampling_effective_proxy_mismatch": ("选定网络服务的代理没有实际生效。", "已进入恢复流程。核对当前联网服务名称，不继续操作官方 App 的提交按钮。"),
+        "sampling_guard_preflight_failed": ("本地拦截自检未通过。", "本轮不会启用系统代理；检查 mitmproxy 安装与监听端口，不继续采样。"),
+        "sampling_guard_listener_failed": ("本地拦截程序未正常启动或已停止。", "先关闭麦当劳并等待代理恢复，再检查 mitmproxy 12.3.1、端口和采样审计文件。"),
+        "sampling_environment_changed": ("采样准备期间 App 或代理状态发生变化。", "本轮未启动正式采样；关闭麦当劳并核对代理后重新准备。"),
+        "sampling_cleanup_needs_attention": ("采样结束，但代理恢复未全部通过。", "保持麦当劳关闭，按本次 capture_directory 内 proxy-before.json 恢复该网络服务的 HTTPS 代理；证书仍保留。"),
+        "sampling_member_mismatch": ("登录维护样本与选择的会员不一致。", "使用该会员自己的近期余额样本，不混合不同账号或手工改写请求头。"),
+        "sampling_system_command_failed": ("macOS 没有完成代理操作。", "先关闭麦当劳，核对本轮 cleanup.json 和网络代理状态；不要继续提交或付款。"),
+        "sampling_app_state_unreadable": ("无法确认麦当劳进程是否已退出。", "保持代理阻断，手动确认麦当劳已关闭后再恢复网络；不要直接放行等待中的请求。"),
         "sampling_certificate_macos_required": ("系统证书管理目前只支持 macOS。", "其他系统继续使用本人调试工具管理证书；本项目未更改系统信任。"),
         "sampling_certificate_keychain_unreadable": ("无法确认登录钥匙串中的证书状态。", "解锁本人登录钥匙串后重试；项目未把查询失败视为证书不存在。"),
         "sampling_certificate_changed": ("本地采样证书、私钥或元数据不一致。", "保留现有文件并核对来源，不重新生成覆盖已信任的证书。"),

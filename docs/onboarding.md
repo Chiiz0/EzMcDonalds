@@ -32,6 +32,8 @@ ezmcd account check personal
 
 ## 从单请求样本或已有 profile 接入
 
+已有账号更新运行字段时，Mac 可使用[无订单采样命令](guarded-capture.md)生成同会话余额与运行样本，再使用原别名及 `--update` 导入。采样期间不会转发订单。
+
 ```sh
 ezmcd account connect personal \
   --balance-sample /absolute/path/balance.json \
