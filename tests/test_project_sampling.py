@@ -9,7 +9,7 @@ import json
 import sys
 
 from ezmcd.errors import EzMcdError
-from ezmcd.sampling import RuntimeCapture
+from ezmcd.sampling import RuntimeCapture, capture_outcome
 from ezmcd.storage import read_private, write_private
 from ezmcd.models import fingerprint
 
@@ -56,6 +56,9 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(result['order_requests_forwarded'],0)
         self.assertEqual(result['payment_requests_forwarded'],0)
         self.assertTrue(result['runtime_saved'])
+        self.assertEqual(result['capture_state'],'complete')
+        self.assertTrue(result['sample_import_ready'])
+        self.assertFalse(result['capture_window_active'])
         self.assertFalse(any('security' in args[0] for args in self.calls))
         self.process.terminate.assert_called_once()
         loader=self.capture.directory/'addon.py'
@@ -131,6 +134,57 @@ class SamplingTests(unittest.TestCase):
             capture.return_value.run.return_value={'runtime_saved':False,'account_updated':False}
             self.assertEqual(main(),2)
         self.assertFalse(json.loads(output.getvalue())['account_updated'])
+
+
+class CaptureOutcomeTests(unittest.TestCase):
+    def test_probe_rejection_is_not_an_official_app_request(self):
+        result=capture_outcome({'blocked_requests':1,'allowed_gets':0,'last_result':'runtime_rejected',
+            'balance_saved':False,'runtime_saved':False})
+        self.assertEqual(result['capture_state'],'no_api_requests')
+        self.assertFalse(result['sample_import_ready'])
+        self.assertTrue(result['new_sampling_required'])
+        self.assertFalse(result['capture_window_active'])
+
+    def test_refresh_or_blocked_real_requests_are_activity_even_without_gets(self):
+        for evidence in ({'allowed_session_refreshes':1,'blocked_requests':1}, {'blocked_requests':2}):
+            self.assertEqual(capture_outcome(evidence)['capture_state'],'balance_missing')
+
+    def test_missing_and_rejected_balances_need_new_capture_not_partial_import(self):
+        for error,state in ((None,'balance_missing'),('wrong_member','balance_rejected')):
+            result=capture_outcome({'allowed_gets':1,'balance_error':error})
+            self.assertEqual(result['capture_state'],state)
+            self.assertFalse(result['sample_import_ready'])
+            self.assertTrue(result['new_sampling_required'])
+
+    def test_valid_balance_is_not_complete_runtime_evidence(self):
+        for last,state in (('balance_captured','runtime_missing'),('runtime_rejected','runtime_rejected'),
+                           ('expired_blocking','runtime_missing')):
+            result=capture_outcome({'allowed_gets':1,'balance_saved':True,'runtime_saved':False,'last_result':last})
+            self.assertEqual(result['capture_state'],state)
+            self.assertFalse(result['sample_import_ready'])
+
+    def test_complete_capture_overrides_historical_rejections_but_window_is_closed(self):
+        result=capture_outcome({'balance_saved':True,'runtime_saved':True,'balance_error':'previous_error',
+            'last_result':'expired_blocking','allowed_gets':5})
+        self.assertEqual(result['capture_state'],'complete')
+        self.assertTrue(result['sample_import_ready'])
+        self.assertFalse(result['new_sampling_required'])
+        self.assertFalse(result['capture_window_active'])
+
+    def test_unknown_diagnostic_text_is_not_copied_into_guidance(self):
+        result=capture_outcome({'allowed_gets':1,'balance_error':'secret-session-or-response'})
+        self.assertNotIn('secret-session-or-response',json.dumps(result))
+
+    def test_cli_rejects_runtime_only_result_without_running_import(self):
+        from ezmcd.cli import main
+        with tempfile.TemporaryDirectory() as root:
+            output=io.StringIO()
+            argv=['ezmcd','--data-dir',root,'sampling-capture','synthetic','--update-account']
+            with patch.object(sys,'argv',argv), patch('ezmcd.sampling.RuntimeCapture') as capture, \
+                    patch('ezmcd.sampling_import.import_capture') as importer, redirect_stdout(output):
+                capture.return_value.run.return_value={'runtime_saved':True,'balance_saved':False,'account_updated':False}
+                self.assertEqual(main(),2)
+                importer.assert_not_called()
 
 
 if __name__=='__main__':unittest.main()

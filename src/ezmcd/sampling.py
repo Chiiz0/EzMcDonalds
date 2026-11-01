@@ -21,6 +21,26 @@ from .storage import read_private, write_private, secure_directory
 PORT = 18089
 
 
+def capture_outcome(audit):
+    """Explain a finished capture; the synthetic blocked probe is not App traffic."""
+    if audit.get("balance_saved") is True and audit.get("runtime_saved") is True:
+        state = "complete"
+        action = "两个样本已校验。核对官方订单、余额和测试购物车后，可用 sampling-import 导入此采样目录；本轮未授权消费。"
+    elif (audit.get("balance_saved") is not True and audit.get("allowed_gets", 0) == 0 and audit.get("blocked_requests", 0) <= 1
+          and audit.get("allowed_session_refreshes", 0) == 0):
+        state = "no_api_requests"
+        action = "窗口内未观察到 App 的 API 请求，只有本地阻断自检。不要导入或继续点提交；确认 Mac App 和联网服务准备好后，再开始新的采样窗口。"
+    elif audit.get("balance_saved") is not True:
+        state = "balance_rejected" if audit.get("balance_error") else "balance_missing"
+        action = "没有可用的本人余额样本。不要导入部分文件或继续提交；核对账号和余额诊断，下次必须先看到 BALANCE_CAPTURED。"
+    else:
+        state = "runtime_rejected" if audit.get("last_result") == "runtime_rejected" else "runtime_missing"
+        action = "余额已校验，但未取得有效运行样本。旧凭据保持不变；不要单独导入余额来覆盖账号，需要在新的保护窗口内完成运行字段采样。"
+    return {"capture_state": state, "sample_import_ready": state == "complete",
+        "new_sampling_required": state != "complete", "capture_window_active": False,
+        "next_action": action}
+
+
 class RuntimeCapture:
     def __init__(self, store, alias, *, service="Wi-Fi", seconds=120, mitmdump=None, refresh_from=None, report=None):
         if (not isinstance(service, str) or not service.strip() or service.startswith("-")
@@ -217,6 +237,8 @@ class RuntimeCapture:
                 for sig, handler in old_signals.items():
                     signal.signal(sig, handler)
         audit = read_private(self.directory / "audit.json")
+        outcome = capture_outcome(audit)
+        self.report({"stage": "CAPTURE_FINISHED", **outcome})
         return {"account": self.alias, "capture_directory": str(self.directory),
             "balance_saved": audit["balance_saved"], "runtime_saved": audit["runtime_saved"],
             "balance_sample": str(self.directory / "balance.json") if audit["balance_saved"] else None,
@@ -224,4 +246,4 @@ class RuntimeCapture:
             "account_updated": False, "certificate_retained": True, "proxy_restored": True,
             "order_requests_forwarded": 0, "payment_requests_forwarded": 0,
             "balance_error": audit.get("balance_error"), "balance_header_checks": audit.get("balance_header_checks"),
-            "next_action": "核对官方订单和余额；清理本轮测试购物车，再使用 account connect --update 导入同会员样本。"}
+            **outcome}

@@ -271,7 +271,7 @@ def main():
         else:
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-        if args.command == "sampling-capture" and not result.get("runtime_saved"):
+        if args.command == "sampling-capture" and not (result.get("runtime_saved") and result.get("balance_saved")):
             return 2
         if args.command == "account" and args.action == "login" and result.get("state") != "CONNECTED":
             return 2
