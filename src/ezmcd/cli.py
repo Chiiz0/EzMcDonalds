@@ -27,6 +27,10 @@ def main():
     sampling.add_argument("--seconds", type=int, default=120)
     sampling.add_argument("--mitmdump", help="Path to your installed mitmdump; otherwise uses PATH")
     sampling.add_argument("--refresh-from", help="Private recent signed balance sample for one matching native session refresh")
+    sampling.add_argument("--update-account", action="store_true", help="After proxy cleanup, verify and atomically import this capture for the same member")
+    sampling_import = commands.add_parser("sampling-import", help="Resume a completed local capture import; only reads upstream, never starts a proxy")
+    sampling_import.add_argument("alias")
+    sampling_import.add_argument("capture_directory")
     account = commands.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("list")
     account.add_parser("guide", help="Show the local credentials setup guide without asking for secrets")
@@ -144,6 +148,12 @@ def main():
             from .sampling import RuntimeCapture
             result = RuntimeCapture(store, args.alias, service=args.network_service, seconds=args.seconds,
                 mitmdump=args.mitmdump, refresh_from=args.refresh_from).run()
+            if args.update_account and result.get("runtime_saved") and result.get("balance_saved"):
+                from .sampling_import import import_capture
+                result |= import_capture(store, args.alias, result["capture_directory"])
+        elif args.command == "sampling-import":
+            from .sampling_import import import_capture
+            result = import_capture(store, args.alias, args.capture_directory)
         elif args.command == "mcp-config":
             result = {"mcpServers": {"ezmcdonalds": {"command": sys.executable,
                 "args": ["-m", "ezmcd.mcp_server"], "env": {"EZMCD_DATA_DIR": str(store.root)}}}}

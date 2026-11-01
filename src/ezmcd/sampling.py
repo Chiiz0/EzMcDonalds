@@ -114,7 +114,8 @@ class RuntimeCapture:
         secure_directory(self.directory)
         deadline = time.time() + self.seconds
         write_private(self.directory / "config.json", {"output": str(self.directory), "binary": account["binary"],
-            "identity": account["identity"], "deadline": deadline, "refresh_session": refresh_session})
+            "identity": account["identity"], "deadline": deadline, "refresh_session": refresh_session,
+            "schema_version": 2, "account_fingerprint": fingerprint(account)})
         write_private(self.directory / "proxy-before.json", {"service": self.service, "proxy": before})
         # mitmdump watches its script for changes. Pin a private loader for this
         # run so an editable install or package upgrade cannot unload the guard.
@@ -208,7 +209,8 @@ class RuntimeCapture:
                     "cleanup_errors": sorted(set(errors)), "official_app_closed": not self.app_running(),
                     "persistent_certificate_retained": True})
                 self.report({"stage": "CLEANUP_RESULT", "proxy_restored": after == before,
-                    "persistent_certificate_retained": True, "errors": sorted(set(errors))})
+                    "persistent_certificate_retained": True, "errors": sorted(set(errors)),
+                    "capture_directory": str(self.directory)})
                 if errors:
                     raise EzMcdError("sampling_cleanup_needs_attention")
             finally:

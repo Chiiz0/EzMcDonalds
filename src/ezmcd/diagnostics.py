@@ -22,7 +22,7 @@ def credentials_guide():
             "运行 ezmcd account check ALIAS；缺少下单运行字段时仍可找店、选餐、准备购物车与报价。",
             "重新登录或刷新后，若 runtime_recovery_available=true，可运行 account runtime ALIAS --previous-device，或让 Agent 调用 account_runtime_restore；只读核验本人原设备的近期样本，保留原采样日期。",
             "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
-            "已有 Mac 账号可在本机使用 sampling-capture ALIAS：复用受限证书、限时阻断订单并采集运行字段；仍需按指引操作和退出官方 App。该命令不通过 MCP 调用。",
+            "已有 Mac 账号可在本机使用 sampling-capture ALIAS --update-account：复用受限证书、限时阻断订单，退出 App 并恢复代理后只读核验和导入。失败可用 sampling-import ALIAS CAPTURE_DIRECTORY 恢复；仍需按指引操作官方 App，不通过 MCP 控制采样。",
             "同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
             "不要为获取运行样本额外创建订单；同设备复用已完成一笔真实订单，长期运行字段更新仍待完成。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],

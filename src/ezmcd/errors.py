@@ -8,6 +8,10 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "sampling_capture_directory_invalid": ("这不是当前数据目录内的私有采样目录。", "使用本次 sampling-capture 输出的 captures/编号 目录，保持原目录和权限，不使用符号链接或其他账号的数据目录。"),
+        "sampling_capture_binding_missing": ("采样缺少新版账号绑定记录。", "旧版样本仍可按凭据指引使用 account connect --update 显式导入；自动恢复只接受新版完整采样，不能补写绑定字段。"),
+        "sampling_capture_incomplete": ("采样没有同时完成余额和运行字段校验。", "先完成 App 退出和代理恢复，再准备新的采样；不导入部分结果。"),
+        "sampling_account_changed_start_new_capture": ("采样后账号或凭据已发生变化。", "旧采样不会覆盖新的登录、撤销或策略。先检查当前账号；需要更新时重新采样，不修改绑定记录。"),
         "invalid_official_order_id": ("官方订单编号无效。", "从同账号的 official_orders_list 复制完整 order_id；不要填写链接或付款引用。"),
         "invalid_official_order_pagination": ("官方订单分页参数无效。", "page 为1至100，limit 为1至20；列表不保证包含账号的全部历史。"),
         "official_order_response_schema_changed": ("官方订单详情包含尚未识别的数据结构。", "保留原购买记录，在官方入口核对；没有据此关联订单或尝试付款。"),

@@ -201,7 +201,8 @@ def update_runtime_from_device(store, alias, source_alias):
         "order_created": False, "payment_attempted": False}
 
 
-def _enroll(store, alias, profile, binary, runtime_sample, phone_label, *, update=False, check_live=False):
+def _enroll(store, alias, profile, binary, runtime_sample, phone_label, *, update=False, check_live=False,
+            expected_account=None, verify_runtime=False, capture_receipt=None):
     fields = profile.get("fields", {})
     if (profile.get("build_sha256") != BUILD or profile.get("verified_endpoint") != "/bff/member/mwallet/balance"
             or not all(isinstance(fields.get(k), str) and fields[k] for k in ("sid", "deviceToken", "meddyId"))
@@ -223,13 +224,26 @@ def _enroll(store, alias, profile, binary, runtime_sample, phone_label, *, updat
         "phone_label": masked, "phone_ownership_verified_by_project": False,
         "profile": profile, "binary": str(Path(binary).expanduser().absolute()), "runtime": runtime,
         "policy": Policy().model_dump(), "imported_at": time.time()}
-    if check_live:
-        from .provider import McdProvider
-        McdProvider(record).wallet()
+    def verify():
+        if check_live:
+            from .provider import McdProvider
+            McdProvider(record).wallet()
+        if verify_runtime:
+            from .sampling_import import verify_capture_runtime
+            verify_capture_runtime(record)
+        if capture_receipt is not None:
+            from .sampling_import import credential_fingerprint
+            record["sampling_import"] = dict(capture_receipt,
+                credential_fingerprint=credential_fingerprint(record))
     if update:
         def replace(old):
+            if expected_account is not None and fingerprint(old) != expected_account:
+                raise EzMcdError("sampling_account_changed_start_new_capture")
             if old["identity"] != identity:
                 raise EzMcdError("cannot_replace_alias_with_different_account")
+            if capture_receipt is not None and old.get("runtime") and (
+                    runtime is None or runtime["observed_at"] < old["runtime"]["observed_at"]):
+                raise EzMcdError("runtime_sample_older_than_current_evidence")
             record["policy"] = old["policy"]
             record["phone_label"] = masked or old.get("phone_label")
             # A balance-only import has no refresh token. Preserve existing
@@ -258,9 +272,11 @@ def _enroll(store, alias, profile, binary, runtime_sample, phone_label, *, updat
                 candidate = retain_candidate(old, record, time.time())
                 if candidate:
                     record["runtime_candidate"] = candidate
+            verify()
             return record
         store.modify_account(alias, replace)
     else:
+        verify()
         store.add_account(record)
     result = public_account(record, session_verified=check_live)
     if check_live:
