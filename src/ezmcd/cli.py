@@ -19,6 +19,8 @@ def main():
     parser = argparse.ArgumentParser(prog="ezmcd", description="EzMcDonald's local account, checkout and MCP tools")
     parser.add_argument("--data-dir", default=os.environ.get("EZMCD_DATA_DIR", "~/.local/share/ezmcdonalds"))
     commands = parser.add_subparsers(dest="command", required=True)
+    certificate = commands.add_parser("sampling-cert", help="Manage an explicit local macOS sampling certificate; never enables a proxy")
+    certificate.add_argument("certificate_action", choices=("prepare", "install", "status", "remove"))
     account = commands.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("list")
     account.add_parser("guide", help="Show the local credentials setup guide without asking for secrets")
@@ -109,7 +111,10 @@ def main():
     try:
         store = Store(Path(args.data_dir))
         service = Service(store)
-        if args.command == "mcp-config":
+        if args.command == "sampling-cert":
+            from .sampling_cert import SamplingCertificate
+            result = getattr(SamplingCertificate(store), args.certificate_action)()
+        elif args.command == "mcp-config":
             result = {"mcpServers": {"ezmcdonalds": {"command": sys.executable,
                 "args": ["-m", "ezmcd.mcp_server"], "env": {"EZMCD_DATA_DIR": str(store.root)}}}}
         elif args.command == "doctor":

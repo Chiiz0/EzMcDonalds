@@ -8,6 +8,16 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "sampling_certificate_macos_required": ("系统证书管理目前只支持 macOS。", "其他系统继续使用本人调试工具管理证书；本项目未更改系统信任。"),
+        "sampling_certificate_keychain_unreadable": ("无法确认登录钥匙串中的证书状态。", "解锁本人登录钥匙串后重试；项目未把查询失败视为证书不存在。"),
+        "sampling_certificate_changed": ("本地采样证书、私钥或元数据不一致。", "保留现有文件并核对来源，不重新生成覆盖已信任的证书。"),
+        "sampling_certificate_expired": ("采样证书已到期或即将到期。", "先运行 sampling-cert remove 撤销旧证书，再 prepare 和 install 创建新证书。"),
+        "sampling_certificate_trust_too_broad": ("此证书在系统中的信任超出了项目主机范围。", "停止采样，运行 sampling-cert remove 撤销后重新安装受限信任。"),
+        "sampling_certificate_authorization_not_completed": ("macOS 没有完成采样证书安装授权。", "在本机系统窗口完成授权后再运行 sampling-cert install；代理和消费策略未改变。"),
+        "sampling_certificate_scope_verification_failed": ("系统未通过限定主机的证书信任检查。", "不要启动采样；运行 sampling-cert status 查看检查结果，必要时 remove 撤销后重新安装。"),
+        "sampling_certificate_removal_not_completed": ("系统证书清理尚未完成。", "完成 macOS 授权后重试 sampling-cert remove；本地证书与私钥保留，便于完成清理。"),
+        "sampling_certificate_directory_contains_unknown_files": ("证书目录包含项目不认识的文件。", "系统清理已尝试；请检查并移走自己的额外文件后重试 remove，项目不会递归删除未知内容。"),
+        "sampling_certificate_in_use": ("采样证书正在被使用或管理。", "先结束当前采样并恢复代理，再安装或撤销证书。"),
         "insufficient_wallet_balance": ("麦钱包余额不足。", "报价仍可查看；由用户在官方入口处理余额后重新报价，本工具不会自动充值。"),
         "session_expired_reconnect_locally": ("账号登录已失效。", "有刷新令牌时调用 account_refresh；否则在本机重新短信登录或更新会话。"),
         "runtime_expired_reconnect_official_session": ("缺少可用的下单运行字段。", "仍可浏览和准备购物车；按凭据指引更新本人官方运行样本后再下单。"),

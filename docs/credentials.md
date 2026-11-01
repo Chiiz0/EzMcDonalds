@@ -26,6 +26,8 @@ ezmcd account login personal --device-from existing-account
 
 ## 从自己的官方 App 导入
 
+需要反复采样的 Mac 用户可选择[持久采样证书](sampling-certificate.md)，首次授权后复用。下文的“移除临时证书”仅针对临时方案；持久方案仍须每轮恢复代理，停用时显式撤销证书。
+
 目前真实适配依赖已验证的 iOS App on Mac 构建；具体版本和校验值见[环境要求](onboarding.md#环境要求)。`doctor` 显示构建不匹配时，不应假定 Android 或其他 App 版本导出的请求能够直接使用。
 
 1. 在官方 App 登录自己的会员账号，停留在“我的”或麦钱包页面。

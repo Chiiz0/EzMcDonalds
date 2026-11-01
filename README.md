@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a10`：本地 Python CLI + 28 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
+**当前版本 `0.1.0a11`：本地 Python CLI + 28 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；下单运行字段尚不能自动更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
@@ -43,7 +43,7 @@ python3 -m venv .venv
 .venv/bin/ezmcd account connect personal --clipboard
 ```
 
-复制的命令只作为文本解析，不执行、不发给 Agent；结束后清理剪贴板、恢复代理并移除临时证书。[复制请求导入与更新说明](docs/request-import.md)。文件方式如下：
+复制的命令只作为文本解析，不执行、不发给 Agent；结束后清理剪贴板、恢复代理并移除临时证书。需要重复采样的 Mac 用户可以显式安装[仅限官方 API 主机的持久采样证书](docs/sampling-certificate.md)，后续复用，停用时撤销。[复制请求导入与更新说明](docs/request-import.md)。文件方式如下：
 
 ```sh
 # HAR 文件只保留自己明确授权的会话，权限必须为 0600
