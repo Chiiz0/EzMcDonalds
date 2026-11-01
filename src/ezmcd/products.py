@@ -5,7 +5,7 @@ trusted. Advanced customization continues to use the configured official cart.
 """
 from .errors import EzMcdError
 from .models import yuan, canonical
-from .modifiers import public_modifiers, selected_modification, verify_modification, configuration_keys
+from .modifiers import public_modifiers, selected_modification, verify_modification, configuration_signature
 from .coupons import coupon_fields, verify_coupon_cart, coupon_signature
 
 
@@ -97,7 +97,7 @@ def verify_cart_contents(draft, cart):
             raise ValueError
         return value
 
-    def components(groups):
+    def components(groups, *, requested):
         rounds = {}
         for group in groups:
             number = group["round"]
@@ -105,7 +105,7 @@ def verify_cart_contents(draft, cart):
                 raise ValueError
             parts = {}
             for part in group.get("comboProducts", []):
-                key = canonical({"code": str(part["code"]), "modifiers": configuration_keys(part)})
+                key = canonical({"code": str(part["code"]), "modifiers": configuration_signature(part, requested=requested)})
                 parts[key] = parts.get(key, 0) + quantity(part["quantity"])
             # An explicitly empty optional round may be omitted by the server.
             rounds[number] = parts
@@ -121,8 +121,8 @@ def verify_cart_contents(draft, cart):
                 coupon = p.get("coupon_fingerprint")
             key = canonical({"code": str(p["code"] if requested else p["product_code"]),
                 "type": str(p["type"] if requested else p["product_type"]), "coupon": coupon,
-                "modifiers": configuration_keys(p if requested else p.get("configuration", {})),
-                "components": components(p.get("comboItems", []) if requested else p.get("components", []))})
+                "modifiers": configuration_signature(p if requested else p.get("configuration", {}), requested=requested),
+                "components": components(p.get("comboItems", []) if requested else p.get("components", []), requested=requested)})
             result[key] = result.get(key, 0) + quantity(p["quantity"])
         return result
 

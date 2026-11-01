@@ -173,7 +173,8 @@ def resolve_modifiers(public, preferences):
             issues.append({"reason": "preferred_ingredient_missing_or_ambiguous", "name": preference.name})
             continue
         i, j, choice = matches[0]
-        if groups[i].get("inactive") or not choice.get("available", True):
+        if groups[i].get("inactive") or (not choice.get("available", True)
+                and not (groups[i].get("kind") == "optional_choice" and preference.quantity == 0)):
             issues.append({"reason": "preferred_ingredient_unavailable", "name": preference.name})
             continue
         if groups[i].get("kind") == "single_choice":
@@ -192,7 +193,8 @@ def resolve_modifiers(public, preferences):
             issues.append({"reason": "preferred_ingredients_outside_live_limits"})
         for j, choice in enumerate(group["choices"]):
             quantity = quantities[i, j]
-            if quantity and (not choice.get("available", True) or cents(choice.get("extra_cny", "0.00")) != 0):
+            if quantity and (not choice.get("available", True) or not choice.get("selection_supported", True)
+                    or cents(choice.get("extra_cny", "0.00")) != 0 and group.get("kind") != "optional_choice"):
                 issues.append({"reason": "preferred_ingredient_unavailable_or_paid", "name": choice["name"]})
             if group.get("kind") == "single_choice":
                 if quantity:
@@ -221,6 +223,28 @@ def apply_preferred_modifiers(detail, preference, groups):
         selection["modifiers"], issues = resolve_modifiers(choice.get("modifiers"), target.modifiers)
         problems.extend(issue | {"component": target.component_name} for issue in issues)
     return modifiers, problems
+
+
+def selected_modifier_extra(public, selections):
+    """Add only explicitly selected optional fees; defaults are validated free."""
+    if not selections or not public:
+        return 0
+    chosen = {s["code"]: s["quantity"] for s in selections}
+    return sum(cents(c["extra_cny"]) * chosen.get(c["code"], 0)
+               for group in public.get("groups", []) if group.get("kind") == "optional_choice"
+               for c in group["choices"])
+
+
+def configuration_extra(detail, modifiers, groups):
+    extra = selected_modifier_extra(detail.get("modifiers"), modifiers)
+    for group in groups:
+        for selection in group["items"]:
+            choices = [c for source in detail["groups"] if source["round"] == group["round"]
+                       for c in source["choices"] if c["product_code"] == selection["product_code"]]
+            if len(choices) != 1:
+                raise EzMcdError("component_not_available_in_selected_round")
+            extra += selection["quantity"] * selected_modifier_extra(choices[0].get("modifiers"), selection.get("modifiers"))
+    return extra
 
 
 def plan_meal(service, account=None, date=None):
@@ -374,7 +398,8 @@ def plan_meal(service, account=None, date=None):
                              "component_modifiers": [m.model_dump(exclude_none=True) for m in preference.component_modifiers]})
         if estimate is not None:
             base = detail.get("configuration_base_cny", offer.get("display_price_cny"))
-            estimate = estimate + (cents(base) + extra) * preference.quantity if base is not None and extra is not None else None
+            fees = configuration_extra(detail, modifiers, groups)
+            estimate = estimate + (cents(base) + extra + fees) * preference.quantity if base is not None and extra is not None else None
     if estimate is not None and estimate > cents(preferences.max_amount_cny):
         issues.append({"reason": "estimated_price_exceeds_preference_limit"})
     key = "meal-" + fingerprint({"account": alias, "store_code": request.store_code, "pickup_at": request.pickup_at})[:32]

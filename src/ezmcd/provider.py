@@ -286,7 +286,8 @@ class McdProvider:
                          "daypartCode": daypart, "scenes": "", "products": products}
 
     def write_cart(self, body):
-        return self.http.send("PUT", "/bff/cart/carts", body=body)
+        from .modifiers import cart_wire_body
+        return self.http.send("PUT", "/bff/cart/carts", body=cart_wire_body(body))
 
     def preflight(self, quote):
         self.http.signer.runtime()  # Fail before order creation if signing state is stale.

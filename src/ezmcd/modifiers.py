@@ -1,4 +1,4 @@
-"""The pinned client's free toggles and single choices, never arbitrary blobs.
+"""The pinned client's toggles and single choices, never arbitrary blobs.
 
 The native cartModificationItemsFromDetail:oldItems: emits code, quantity=1
 and selectedKey/unselectedKey inside modification.values. Those keys describe
@@ -29,8 +29,9 @@ def modifier_groups(product):
         if modes not in ({1}, {2}):
             raise EzMcdError("advanced_customization_requires_official_cart")
         single = modes == {1}
+        optional = single and low == 0 and high == 1 and len(values) == 1
         codes, keys = set(), set()
-        if single and (low != 1 or high != 1 or len(values) > 20):
+        if single and not optional and (low != 1 or high != 1 or len(values) > 20):
             raise EzMcdError("advanced_customization_requires_official_cart")
         for item in values:
             code = item.get("code")
@@ -40,7 +41,13 @@ def modifier_groups(product):
                     or item.get("maxQuantity") != 1 or type(item.get("selectedQuantity")) is not int
                     or item["selectedQuantity"] not in (0, 1) or type(item.get("soldOut")) is not bool):
                 raise EzMcdError("advanced_customization_requires_official_cart")
-            if single:
+            if optional:
+                # Observed optional milk replacement: its unselected default
+                # costs nothing; the user must explicitly choose the surcharge.
+                if (item.get("selectedKey") != "0-1" or item.get("unselectedKey") != "0-0"
+                        or item["selectedQuantity"] != 0 or not 0 <= item["price"] <= 100000):
+                    raise EzMcdError("advanced_customization_requires_official_cart")
+            elif single:
                 key = item.get("selectedKey")
                 if (not isinstance(key, str) or not re.fullmatch(r"[0-9]{1,4}-[0-9]{1,4}", key)
                         or key in keys or item.get("unselectedKey") or item["price"] < 0):
@@ -53,8 +60,8 @@ def modifier_groups(product):
         if single and len(codes) != 1:
             raise EzMcdError("advanced_customization_requires_official_cart")
         seen.update(codes)
-        inactive = single and all(v["soldOut"] and v["selectedQuantity"] == 0 for v in values)
-        result.append(group | {"_kind": "single_choice" if single else "toggle", "_inactive": inactive})
+        inactive = single and not optional and all(v["soldOut"] and v["selectedQuantity"] == 0 for v in values)
+        result.append(group | {"_kind": "optional_choice" if optional else "single_choice" if single else "toggle", "_inactive": inactive})
     if len(seen) > 20:
         raise EzMcdError("advanced_customization_requires_official_cart")
     return result
@@ -66,10 +73,21 @@ def selected_modification(product, selections=None):
     if choices is not None:
         if len(choices) != len(selections) or set(choices) != {v["code"] for g in groups for v in g["values"]}:
             raise EzMcdError("select_every_modifier_exactly_once")
-    values = []
+    values, prices = [], {}
     for group in groups:
         options = group["values"]
-        if group["_kind"] == "single_choice":
+        if group["_kind"] == "optional_choice":
+            item = options[0]
+            quantity = choices[item["code"]].quantity if choices is not None else 0
+            if choices is not None and choices[item["code"]].key is not None:
+                raise EzMcdError("toggle_modifier_does_not_accept_choice_key")
+            if quantity and item["soldOut"]:
+                raise EzMcdError("modifier_choice_unavailable")
+            values.append({"code": item["code"], "quantity": 1,
+                           "key": item["selectedKey"] if quantity else item["unselectedKey"]})
+            if quantity and item["price"]:
+                prices[item["code"]] = item["price"]
+        elif group["_kind"] == "single_choice":
             if choices is None:
                 selected = [v for v in options if v["selectedQuantity"] == 1]
             else:
@@ -88,7 +106,7 @@ def selected_modification(product, selections=None):
                 "key": v["selectedKey"] if quantities[v["code"]] else v["unselectedKey"]} for v in options)
     if not values:
         return {"customization": {"options": [], "items": []}}
-    return {"modification": {"values": values}}
+    return {"modification": {"values": values}} | ({"_ezmcd_modifier_prices": prices} if prices else {})
 
 
 def public_modifiers(product):
@@ -98,17 +116,18 @@ def public_modifiers(product):
     except (EzMcdError, TypeError, KeyError, AttributeError):
         return {"supported": False, "groups": [], "reason": "advanced_customization_requires_official_cart"}
     from .models import yuan
-    return {"supported": True, "selection_rule": "Specify every active code once: toggles use quantity 0/1 without key; single_choice uses quantity=1 and the selected listed key. Inactive groups are omitted. Paid choices require the official App.",
+    return {"supported": True, "selection_rule": "Specify every active code once: toggle and optional_choice use quantity 0/1 without key; single_choice uses quantity=1 and the selected listed key. Inactive groups are omitted. Optional choices may cost extra; always obtain a fresh quote.",
         "groups": [{"index": i, "name": g.get("title", ""), "kind": g["_kind"], "inactive": g["_inactive"],
             "min_quantity": g["minValues"], "max_quantity": g["maxValues"],
             "choices": [{"code": v["code"], "name": v.get("name", ""), "default_quantity": v["selectedQuantity"],
                          "available": not v["soldOut"], "extra_cny": yuan(v["price"]),
+                         "selection_supported": g["_kind"] != "single_choice" or v["price"] == 0,
                          **({"key": v["selectedKey"]} if g["_kind"] == "single_choice" else {})}
                         for v in g["values"]]} for i, g in enumerate(groups)]}
 
 
-def configuration_keys(actual):
-    """Normalize supported free choices without trusting display labels."""
+def configuration_keys(actual, *, allow_paid=False):
+    """Normalize observed choices; paid echoes require explicit caller support."""
     try:
         if actual.get("grills") or actual.get("biasChoices"):
             raise ValueError
@@ -129,13 +148,15 @@ def configuration_keys(actual):
             raise ValueError
         if any("price" in v and (type(v["price"]) is not int or v["price"] != 0) for v in options):
             raise ValueError
-        # Observed single-choice cart echo: group code/key identifies the choice;
-        # one free selected value is nested inside the group, e.g. less ice.
+        # Group code/key identifies the choice. Paid optional replacements use
+        # key 0-1 and one selected value; their exact price is compared separately.
         for item in items:
             values = item["values"]
             if (not isinstance(values, list) or len(values) != 1
-                    or type(values[0].get("quantity")) is not int or values[0]["quantity"] != 1
-                    or type(values[0].get("price")) is not int or values[0]["price"] != 0):
+                    or type(values[0].get("quantity")) is not int or values[0]["quantity"] not in (0, 1)
+                    or type(values[0].get("price")) is not int or not 0 <= values[0]["price"] <= 100000
+                    or values[0]["quantity"] == 0 and item.get("key") != "0-0"
+                    or values[0]["quantity"] == 1 and values[0]["price"] != 0 and (not allow_paid or item.get("key") != "0-1")):
                 raise ValueError
         if options or items:
             representations.append(options + items)
@@ -154,8 +175,43 @@ def configuration_keys(actual):
         raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart") from None
 
 
+def configuration_signature(actual, *, requested=False):
+    """Bind a paid echo to the exact surcharge saved before the cart write.
+
+    Local price evidence is never sent upstream or accepted from cart responses.
+    Free choices retain their original comparison, including both echo formats.
+    """
+    keys = configuration_keys(actual, allow_paid=not requested)
+    if requested:
+        prices = actual.get("_ezmcd_modifier_prices", {})
+        if (not isinstance(prices, dict) or any(code not in keys or keys[code] != "0-1"
+                or type(price) is not int or not 0 < price <= 100000 for code, price in prices.items())):
+            raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart")
+    else:
+        prices = {item["code"]: item["values"][0]["price"]
+                  for item in (actual.get("customization") or {}).get("items", [])
+                  if item["values"][0]["quantity"] == 1 and item["values"][0]["price"]}
+    return {"keys": keys, "paid": prices}
+
+
+def modifier_extra_cents(actual):
+    return sum(configuration_signature(actual)["paid"].values())
+
+
+def cart_wire_body(draft):
+    """Remove only our local price evidence from the outgoing native shape."""
+    from copy import deepcopy
+    body = deepcopy(draft)
+    for product in body.get("products", []):
+        product.pop("_ezmcd_modifier_prices", None)
+        for group in product.get("comboItems", []):
+            for part in group.get("comboProducts", []):
+                part.pop("_ezmcd_modifier_prices", None)
+    return body
+
+
 def verify_modification(expected, actual):
     """Stop when the server changes an explicitly submitted ingredient."""
     wanted = expected.get("modification", {}).get("values")
-    if wanted is not None and configuration_keys(actual) != {v["code"]: v["key"] for v in wanted}:
+    if wanted is not None and configuration_signature(actual) != configuration_signature(expected, requested=True):
         raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart")

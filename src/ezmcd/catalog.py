@@ -117,11 +117,10 @@ def verify_confirmation_components(product, rows):
             if (str(product.get("type")) != "1" or expected or not items or customization.get("options")
                     or product.get("grills") or product.get("biasChoices") or product.get("modification")):
                 raise ValueError
-            # Validate the free selected-value shape as well as the labels.
-            from .modifiers import verify_modification
-            verify_modification({"modification": {"values": [{"code": i["code"], "key": i["key"], "quantity": 1}
-                                                              for i in items]}}, product)
-            expected = sorted((i["displayText"], 1) for i in items)
+            # Validate selected values and optional surcharges as well as labels.
+            from .modifiers import configuration_signature
+            configuration_signature(product)
+            expected = sorted((i["displayText"], 1) for i in items if i["values"][0]["quantity"] == 1)
             if any(not isinstance(name, str) or not name for name, _ in expected):
                 raise ValueError
             if any(set(i) != {"name", "quantity"} or type(i["quantity"]) is not int or i["quantity"] != 1 for i in rows):
@@ -176,6 +175,8 @@ def cart_regular_subtotal(product):
     # compares the confirmation unit/row prices and disallows order discounts.
     if str(product.get("type")) == "7":
         return regular_combo_subtotal(product)
+    if str(product.get("type")) == "1" and (product.get("customization") or {}).get("items"):
+        return regular_customized_subtotal(product)
     # Observed ordinary-item carts omit subTotalPrice, retaining unit prices.
     original, actual, quantity = (product.get(k) for k in ("originPrice", "realPrice", "quantity"))
     if (str(product.get("type")) != "1" or any(product.get(k) for k in (
@@ -188,8 +189,24 @@ def cart_regular_subtotal(product):
     return original * quantity
 
 
+def regular_customized_subtotal(product):
+    """Observed ordinary optional replacement: original + extra = actual unit."""
+    from .modifiers import modifier_extra_cents
+    try:
+        original, actual, quantity = (product.get(k) for k in ("originPrice", "realPrice", "quantity"))
+        if (any(type(v) is not int for v in (original, actual, quantity))
+                or not 0 < original <= actual <= 100000 or not 1 <= quantity <= 20
+                or type(product.get("realSubTotalPrice")) is not int or actual * quantity != product["realSubTotalPrice"]
+                or any(product.get(k) for k in ("coupon", "comboItems", "modification", "grills", "biasChoices"))
+                or product["customization"].get("options") or original + modifier_extra_cents(product) != actual):
+            raise ValueError
+    except (EzMcdError, AttributeError, KeyError, TypeError, ValueError):
+        raise EzMcdError("cart_product_price_structure_unverified") from None
+    return actual * quantity
+
+
 def regular_combo_subtotal(product):
-    from .modifiers import configuration_keys
+    from .modifiers import configuration_signature
     try:
         original, actual, quantity = (product.get(k) for k in ("originPrice", "realPrice", "quantity"))
         if (any(type(v) is not int for v in (original, actual, quantity)) or original != 0
@@ -214,7 +231,7 @@ def regular_combo_subtotal(product):
                         or part.get("coupon") or part.get("comboItems") or part.get("products")):
                     raise ValueError
                 codes.add(code)
-                configuration_keys(part)  # Existing free-modifier echo checks.
+                configuration_signature(part)
     except (EzMcdError, AttributeError, KeyError, TypeError, ValueError):
         raise EzMcdError("cart_product_price_structure_unverified") from None
     return actual * quantity
@@ -257,7 +274,7 @@ def checkout(args, cart, confirmation, daypart):
                 or not row.get("uniqueKey") or cents(row.get("realSubtotal")) != p["realSubTotalPrice"]
                 or cents(row.get("subtotal")) != cart_regular_subtotal(p)
                 or "subTotalPrice" not in p and cents(row.get("price")) != (
-                    p["realPrice"] if str(p.get("type")) == "7" else p["originPrice"])):
+                    p["realPrice"] if str(p.get("type")) == "7" or (p.get("customization") or {}).get("items") else p["originPrice"])):
             raise EzMcdError("confirmation_product_mismatch")
         seen.add(seq)
         verify_confirmation_components(p, row.get("comboItemList", []))
@@ -274,7 +291,8 @@ def checkout(args, cart, confirmation, daypart):
         output.update(productPrice=row["price"], changeQuantity=0, status=0,
             couponList=[{k: deepcopy(c[k]) for k in ("couponCode", "couponName", "couponId", "image", "promotionId", "showPmtType") if k in c} for c in coupons])
         order_rows.append(output)
-    if sum(p["realSubTotalPrice"] for p in products) != amount:
+    if (sum(p["realSubTotalPrice"] for p in products) != amount
+            or sum(cart_regular_subtotal(p) for p in products) != regular):
         raise EzMcdError("unmodeled_order_level_discount_or_fee")
     tableware = [x for x in confirmation.get("tablewareInfo", {}).get("options", []) if x.get("selected") is True]
     if len(tableware) != 1:

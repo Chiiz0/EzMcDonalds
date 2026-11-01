@@ -8,6 +8,7 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "modifier_choice_unavailable": ("所选可选配料已售罄。", "重新读取 product_detail；不要自动取消用户要求的换奶或其他选择后继续购买。"),
         "variant_combo_schema_or_price_changed": ("该套餐规格的轮次、默认份数或价格公式不符合已支持结构。", "重新读取父商品详情；不要猜测加价或把规格展示价再叠加默认饮品费用。此时可在官方 App 配置后核对购物车。"),
         "sampling_capture_directory_invalid": ("这不是当前数据目录内的私有采样目录。", "使用本次 sampling-capture 输出的 captures/编号 目录，保持原目录和权限，不使用符号链接或其他账号的数据目录。"),
         "sampling_capture_binding_missing": ("采样缺少新版账号绑定记录。", "旧版样本仍可按凭据指引使用 account connect --update 显式导入；自动恢复只接受新版完整采样，不能补写绑定字段。"),
@@ -104,7 +105,7 @@ def error_result(code):
         "runtime_header_value_invalid": ("粘贴的请求头值为空或格式不正确。", "逐项粘贴官方请求的 sid、token、x-mcd-sign 的值，不含字段名或换行。"),
         "cart_modifier_selection_not_confirmed_review_cart": ("服务器购物车没有确认所选配料。", "先调用 cart_get 核对；不要自动重新加购或继续付款，必要时在官方 App 修正。"),
         "select_every_modifier_exactly_once": ("配料选择不完整或重复。", "重新读取 product_detail，对所有活动组的代码各选择一次；保留/去除用0或1，单选组用数量1及所选项的实时 key。"),
-        "select_one_available_free_modifier_choice": ("单选配料不明确、售罄或需要加价。", "从 product_detail 的对应组选择一个免费且可用的选项，使用其 key 和数量1；收费定制交回官方 App。"),
+        "select_one_available_free_modifier_choice": ("必选单选配料不明确、售罄或需要未支持的加价。", "从 product_detail 的 single_choice 组选择一个免费且可用的选项，使用其 key 和数量1。optional_choice 的收费选择按其独立规则处理。"),
         "coupon_not_found_for_account_store_time": ("这张券不属于当前账号、门店或取餐时间的结果。", "重新调用 coupons_list 选择，不沿用其他请求的 coupon_ref，也不自动改成原价。"),
         "coupon_unavailable_for_selected_pickup": ("当前门店或取餐时间无法使用这张券，或次数已用完。", "重新查询券的适用状态和规则，由用户选择其他券或调整安排；不自动换券或原价购买。"),
         "coupon_configuration_or_quantity_requires_review": ("该券的商品配置或数量不在支持范围内。", "重新查询 coupon_products 与 product_detail；需要特殊兑换流程的券交回官方 App。"),
