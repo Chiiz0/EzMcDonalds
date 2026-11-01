@@ -37,7 +37,9 @@ def build_server(service):
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
-        "With a nonempty cart, pickup_methods reports actual restaurant fulfillment options. Only locker-in is implemented; never substitute dine-in or counter pickup. "
+        "With a nonempty cart, pickup_methods reports the initial confirmation's fulfillment options. Locker-in and take-in-store are implemented. "
+        "If the requested method is not selected, use checkout_quote_pickup with a fresh cart_ref and stable key; its READY result is the quote to review and submit. "
+        "The selection belongs to that quote: a new initial GET may still show a default. Recover lost preparation replies with checkout_quote_pickup_status; never resend an unresolved switch under a new key. "
         "To change a nonempty cart, inspect cart_get and use its short-lived cart_ref with cart_clear only when the user wants those items removed. "
         "After cart addition, only MATCHED suggests a fresh quote. On a lost reply or restart use cart_add_status; never switch keys to repeat an unresolved addition. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
@@ -49,17 +51,18 @@ def build_server(service):
     @server.tool(annotations=READ)
     def capabilities() -> dict:
         """Report implemented features and explicitly unverified or unsupported flows."""
-        return {"version": __version__, "transport": "stdio", "market": "China mainland", "fulfillment": ["locker-in"],
+        return {"version": __version__, "transport": "stdio", "market": "China mainland", "fulfillment": ["locker-in", "take-in-store"],
             "accounts": "isolated official-session imports and local SMS login", "sms_login": True,
             "sms_login_scope": "local_terminal_existing_member_requires_observed_official_device_context",
             "sms_login_via_mcp": False, "session_auto_refresh": False,
             "session_refresh": "explicit account_refresh; local 24h rotation interval, no ambiguous POST retries",
-            "stores": "city/name search or explicit coordinates, favorites, live pickup slots; compatible locker pickup required",
-            "pickup_methods": "read actual confirmation-page methods for a nonempty cart; report selected/available/supported separately; never change fulfillment or infer locker support from store tags",
+            "stores": "city/name search or explicit coordinates, favorites, live pickup slots; available locker or counter pickup required",
+            "pickup_methods": "read initial confirmation methods for a nonempty cart; report selected/available/supported separately; never change fulfillment or infer locker support from store tags",
+            "pickup_quote": "explicit one-shot method switch, persisted response and 120-second selected quote; submit rechecks unchanged cart/prices using GETs without repeating the switch; no fallback to default fulfillment",
             "meal_preferences": "local saved products, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
             "membership_assets": "card validity and coupon category counts; coupons_list queries current store/time availability and coupon_products lists matching products",
             "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
-            "ordinary_cart_evidence": "two plain hash browns, and a hash brown plus fried dough stick: real addition, CNY17.00 quotes and clear; no new payment; another store's cart matched but counter-only fulfillment stopped quoting",
+            "ordinary_cart_evidence": "two hash browns, and a hash brown plus fried dough stick: real CNY17.00 quotes; another store's counter pickup passed explicit switch, CNY8.50 quote, process restart and clear; no new payment",
             "order_components": "verified against each parent product and quantity before payment; swapping components across distinct meal rows is rejected",
             "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
             "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks; ordinary coupon payment unverified",
@@ -71,7 +74,7 @@ def build_server(service):
             "local_request_import": "CLI only: copy one signed balance request as cURL/raw HTTP, then connect --clipboard on Mac or --request-file; validates signature and live balance, never executes copied commands; runtime supports the same text sources and discards the order body",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
-            "real_e2e_evidence": "public core through stdio MCP: one SMS-authorized account, one store, breakfast-card combo, CNY12.60 McWallet payment; duplicate after restart returned the same paid order without new writes; other meal/store scenarios unverified",
+            "real_e2e_evidence": "public core through stdio MCP: one SMS-authorized account, one store, breakfast-card combo, CNY12.60 McWallet payment; duplicate after restart returned the same paid order without new writes; counter pickup and other meal/store payments unverified",
             "payment_settlement": "successful consume followed by at most four read-only status checks, with 1/2/4 second delays; UNKNOWN is query-only, never a reason to repeat payment",
             "order_recovery": "orders_list finds local attempts by account, pickup date and state; works offline after session expiry/revocation; order_status queries the original order live",
             "automatic_retries": False, "automatic_schedule": False}
@@ -201,7 +204,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def pickup_methods(request: CheckoutInput) -> dict:
-        """With a nonempty cart, read actual confirmation-page pickup methods and selection. Available does not mean implemented: only locker-in is supported. Never switches the method or quotes/pays. Empty-cart upstream rejection is not proof that a method is unavailable."""
+        """With a nonempty cart, read initial confirmation methods and default selection. Locker-in and take-in-store are supported. This GET does not reflect a previously prepared selected quote. Never switches or pays. Empty-cart upstream rejection is not proof a method is unavailable."""
         account, provider = service.provider(request.account)
         with service.store.lock(account["identity"]):
             return provider.pickup_methods(request)
@@ -253,8 +256,20 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def checkout_quote(request: CheckoutInput) -> dict:
-        """Validate the current cart, components, discounts, locker/time, wallet and price cap; create a 120-second quote."""
+        """Read-only quote for an initial confirmation already selecting the requested locker/counter method. Validate cart, discounts, time, wallet and cap; create a 120-second quote. Otherwise use checkout_quote_pickup explicitly."""
         return service.quote(request)
+
+    @server.tool(annotations=PAY)
+    @protected
+    def checkout_quote_pickup(request: CheckoutInput, cart_ref: str, idempotency_key: str) -> dict:
+        """Select the explicitly requested locker/counter method and return its 120-second quote. Requires a fresh cart_get reference and nonempty unchanged cart. Sends one switch PUT, persists its reply; repeated key only validates the original result, never renews/resends. READY is the quote to review, then checkout_submit. Does not create or pay an order. Do not edit concurrently in the App."""
+        return service.quote_pickup(request, cart_ref, idempotency_key)
+
+    @server.tool(annotations=READ)
+    @protected
+    def checkout_quote_pickup_status(account: str, operation_id: str | None = None) -> dict:
+        """Recover a specific or latest local pickup quote preparation. Reads current cart and initial confirmation, checks the saved switch response. Never resends or renews; a missing response cannot be reconstructed from the initial default selection. Only READY may be reviewed for checkout."""
+        return service.pickup_quote_status(account, operation_id)
 
     @server.tool(annotations=PAY)
     @protected

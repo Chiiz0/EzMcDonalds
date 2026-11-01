@@ -86,6 +86,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS cart_additions(id TEXT PRIMARY KEY, identity TEXT NOT NULL,
                 scope TEXT NOT NULL, request_digest TEXT NOT NULL, created REAL NOT NULL,
                 closed INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS pickup_quotes(id TEXT PRIMARY KEY, identity TEXT NOT NULL,
+                cart_ref TEXT NOT NULL, scope TEXT NOT NULL, created REAL NOT NULL,
+                closed INTEGER NOT NULL DEFAULT 0, data TEXT NOT NULL, UNIQUE(identity,cart_ref));
             """)
 
     @contextmanager
@@ -189,6 +192,45 @@ class Store:
             conn.execute("UPDATE cart_additions SET closed=1 WHERE identity=? AND scope IN "
                          "(SELECT scope FROM cart_snapshots WHERE id=? AND identity=? AND confirmed=1)",
                          (identity, ref, identity))
+            conn.execute("UPDATE pickup_quotes SET closed=1 WHERE identity=? AND scope IN "
+                         "(SELECT scope FROM cart_snapshots WHERE id=? AND identity=? AND confirmed=1)",
+                         (identity, ref, identity))
+
+    def pickup_quote(self, identity, operation_id=None):
+        with self.connect() as conn:
+            if operation_id is None:
+                row = conn.execute("SELECT data FROM pickup_quotes WHERE identity=? ORDER BY created DESC,rowid DESC LIMIT 1", (identity,)).fetchone()
+            else:
+                row = conn.execute("SELECT data FROM pickup_quotes WHERE identity=? AND id=?", (identity, operation_id)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def pending_pickup_quote(self, identity):
+        with self.connect() as conn:
+            return conn.execute("SELECT 1 FROM pickup_quotes WHERE identity=? AND closed=0 LIMIT 1", (identity,)).fetchone() is not None
+
+    def claim_pickup_quote(self, identity, record):
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                conn.execute("INSERT INTO pickup_quotes(id,identity,cart_ref,scope,created,data) VALUES (?,?,?,?,?,?)",
+                    (record["operation_id"], identity, record["cart_ref"], canonical(record["scope"]), record["created_at"], canonical(record)))
+                conn.execute("INSERT INTO writes VALUES (?,?,?,NULL)", (record["operation_id"], "pickup_quote", time.time()))
+            except sqlite3.IntegrityError:
+                raise EzMcdError("pickup_quote_reference_already_used") from None
+
+    def update_pickup_quote(self, identity, record):
+        with self.connect() as conn:
+            conn.execute("UPDATE pickup_quotes SET data=? WHERE identity=? AND id=?", (canonical(record), identity, record["operation_id"]))
+
+    def complete_pickup_quote(self, identity, record, quote):
+        with self.connect() as conn:
+            conn.execute("INSERT INTO quotes VALUES (?,?,?)", (quote["quote_id"], identity, canonical(quote)))
+            conn.execute("UPDATE pickup_quotes SET closed=1,data=? WHERE identity=? AND id=?", (canonical(record), identity, record["operation_id"]))
+
+    def write_receipt(self, operation_id, stage):
+        with self.connect() as conn:
+            row = conn.execute("SELECT receipt FROM writes WHERE attempt=? AND stage=?", (operation_id, stage)).fetchone()
+        return json.loads(row[0]) if row and row[0] else None
 
     def cart_addition(self, identity, operation_id=None):
         with self.connect() as conn:

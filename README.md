@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a15`：本地 Python CLI + 31 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
+**当前版本 `0.1.0a16`：本地 Python CLI + 33 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；已有 Mac 账号可用 `sampling-capture` 无订单采集运行字段，仍需操作官方 App，尚不能自动跨日更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
@@ -89,7 +89,7 @@ chmod 600 /absolute/path/account.har
 1. `capabilities` → `accounts_list` → `account_diagnose`；已有刷新令牌时可调用 `account_refresh` 维护会话。
 2. `stores_search` / `stores_favorites` → `pickup_slots` → `membership_assets` / `menu_list`；指定优惠券可用 `coupons_list` → `coupon_products` 查看对应商品。
 3. `product_detail` 查看套餐轮次和组件；`cart_add_configured` 添加明确选择的商品到空购物车。已有餐品先 `cart_get` 查看，用户要重新选餐时可 `cart_clear` 后再加购；复杂定制仍可在官方 App 配置。
-4. 加购返回 `MATCHED` 后继续；断线或重启用 `cart_add_status` 找回原请求，不换键重加。非空车可用 `pickup_methods` 核对实际取餐方式；目前只支持店内取餐柜，柜台自取不可自动替代。常用餐品可通过 `preferences_save` 保存，再用 `meal_plan` 生成草案。`checkout_quote` 核对商品、优惠和最终金额，报价有效期 120 秒；余额不足仍展示报价和付款缺口。
+4. 加购返回 `MATCHED` 后继续；断线或重启用 `cart_add_status` 找回原请求，不换键重加。非空车用 `pickup_methods` 核对取餐柜或柜台自取。所需方式已选中时用 `checkout_quote`；可用但未选中时，用新鲜 `cart_ref` 和稳定键调用 `checkout_quote_pickup`，其 `READY` 结果就是待审阅报价。常用餐品可保存偏好并用 `meal_plan` 生成草案。报价最多有效120秒；余额不足仍展示金额和付款缺口。
 5. 本地策略已授权时，`checkout_submit` 创建并支付一单；同一购买使用稳定的 `idempotency_key`。
 6. `order_status` 查询订单与取餐号。支付成功响应后会短暂等待状态同步；仍为 `UNKNOWN` 时只查询，不换 key 重下。`pickup_code_pending=true` 表示付款已核验、取餐码待生成。
 
@@ -101,7 +101,7 @@ chmod 600 /absolute/path/account.har
 
 [优惠券选择](docs/coupons.md)会重新核对券、门店和时段；券失效不自动改成原价。普通冰美式券＋少冰已完成真实加购、¥9.90报价与清空；普通券付款仍待验收。[修改购物车](docs/cart.md)。
 
-普通单品也已真实验证两份脆薯饼，以及脆薯饼＋脆香油条的加购、各 ¥17.00 报价和清空。另一门店虽支持柜台自取，却未提供取餐柜，项目会停止报价；这些购物车测试没有新增购买，不代表跨店付款已验收。
+普通单品已真实验证两份脆薯饼，以及脆薯饼＋脆香油条的加购、各 ¥17.00 报价和清空。另一门店的柜台自取也已完成显式切换、¥8.50报价及新进程恢复，重复调用没有再次切换。这些测试没有新增购买，柜台自取和跨店真实付款仍待验收。[取餐方式与报价恢复](docs/pickup.md)。
 
 ## 实现特点
 

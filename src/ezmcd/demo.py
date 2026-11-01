@@ -82,10 +82,8 @@ class DemoProvider:
             raise EzMcdError("pickup_time_has_passed")
         if not self.read()["cart_quantity"]:
             raise EzMcdError("cart_empty_or_unavailable")
-        return pickup_methods(args, {"submit": 1, "orderType": "1", "storeInfo": self.store(args.store_code),
-            "dayPart": {"dayPartCode": "2"}, "storePickUpInfo": {
-                "pickupExpectTimeValue": pickup_time(args.pickup_at).strftime("%Y-%m-%d %H:%M"),
-                "eatTypeOptions": [{"code": "locker-in", "text": "外带", "subText": "演示取餐柜", "selected": True}]}}, "2") | {"simulation": True}
+        _, conf, daypart = self._checkout_data(args)
+        return pickup_methods(args, conf, daypart) | {"simulation": True}
 
     def menu(self, args, keyword=""):
         self.store(args.store_code)
@@ -108,6 +106,10 @@ class DemoProvider:
         return self.simple_cart_draft(args, selections)
 
     def quote(self, args):
+        cart, confirmation, daypart = self._checkout_data(args)
+        return checkout(args, cart, confirmation, daypart)
+
+    def _checkout_data(self, args):
         self.store(args.store_code)
         when = pickup_time(args.pickup_at)
         if when <= datetime.now(timezone.utc):
@@ -120,13 +122,31 @@ class DemoProvider:
                 "saleStatus": 1, "realSubTotalPrice": amount, "subTotalPrice": amount, "comboItems": []}]}
         conf = {"submit": 1, "orderType": "1", "storeInfo": self.store(args.store_code), "dayPart": {"dayPartCode": "2"},
             "storePickUpInfo": {"pickupExpectTimeValue": when.strftime("%Y-%m-%d %H:%M"),
-                "eatTypeOptions": [{"selected": True, "code": "locker-in"}]},
+                "eatTypeOptions": [{"selected": True, "code": "locker-in"}, {"code": "take-in-store"}]},
             "tablewareInfo": {"options": [{"selected": True, "code": "no"}]},
             "productPriceInfo": {"realTotalAmount": yuan(amount), "totalAmount": yuan(amount), "discountAmount": "0",
                 "cartProductList": [{"sequence": 1, "productCode": "100001", "productName": "演示汉堡", "productType": "1",
                     "quantity": quantity, "saleStatus": 1, "uniqueKey": "demo-cart-item", "price": "10.00",
                     "realSubtotal": yuan(amount), "subtotal": yuan(amount), "productImage": "", "comboItemList": [], "couponList": []}]}}
-        return checkout(args, cart, conf, "2")
+        return cart, conf, "2"
+
+    def prepare_pickup(self, args):
+        result = McdProvider.prepare_pickup(self, args)
+        result["snapshot_digest"] = self.cart_state(args)[2]
+        return result
+
+    finish_pickup = McdProvider.finish_pickup
+    revalidate_pickup_quote = McdProvider.revalidate_pickup_quote
+
+    def switch_pickup(self, body):
+        from .models import CheckoutInput
+        args = CheckoutInput(account=self.account["alias"], store_code=body["storeCode"],
+            pickup_at=body["date"] + "T" + body["time"] + ":00+08:00", max_amount_cny="1000", eat_type=body["eatTypeCodeNew"])
+        _, conf, _ = self._checkout_data(args)
+        for option in conf["storePickUpInfo"]["eatTypeOptions"]:
+            option["selected"] = option["code"] == body["eatTypeCodeNew"]
+        del conf["tablewareInfo"]
+        return {"http_status": 200, "response": {"success": True, "data": {"switchResult": True, "confirmInfo": conf}}}
 
     def cart(self, args):
         self.store(args.store_code)
@@ -168,7 +188,8 @@ class DemoProvider:
         order_id, pay_id = "DEMO-" + uuid.uuid4().hex, "PAY-" + uuid.uuid4().hex
         order = {"orderId": order_id, "payId": pay_id, "storeCode": quote["store_code"],
             "expectPickUpTime": pickup_time(quote["pickup_at"]).strftime("%Y-%m-%d %H:%M:%S"),
-            "lockerOrder": True, "realTotalAmount": yuan(quote["amount_cents"]), "realPayAmount": "", "leftPaySecond": 900,
+            "lockerOrder": quote["eat_type"] == "locker-in", "orderType": "1", "beType": "1", "eatType": 2,
+            "realTotalAmount": yuan(quote["amount_cents"]), "realPayAmount": "", "leftPaySecond": 900,
             "orderStatusTitle": "待支付", "paymentChannel": "", "orderProductList": [
                 {"productCode": x["product_code"], "quantity": x["quantity"], "comboItemList": []} for x in quote["items"]]}
         state["orders"][order_id] = order

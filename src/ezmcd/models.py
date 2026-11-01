@@ -123,9 +123,9 @@ class CheckoutInput(BaseModel):
     @field_validator("eat_type")
     @classmethod
     def eat(cls, value):
-        # Other codes require additional fulfilment fields and acceptance tests.
-        if value != "locker-in":
-            raise ValueError("This adapter currently supports in-store pickup lockers")
+        # Drive-through and dine-in require different fulfillment validation.
+        if value not in ("locker-in", "take-in-store"):
+            raise ValueError("Choose in-store pickup lockers or counter collection")
         return value
 
 

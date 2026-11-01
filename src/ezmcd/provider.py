@@ -189,10 +189,48 @@ class McdProvider:
         return pickup_methods(args, self._confirmation(args, daypart, params), daypart)
 
     def quote(self, args):
+        cart, confirmation, daypart = self._checkout_data(args)
+        return checkout(args, cart, confirmation, daypart)
+
+    def _checkout_data(self, args):
         daypart, params = self.context(args)
         cart = self.get("/bff/cart/carts", params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart})
         confirmation = self._confirmation(args, daypart, params)
-        return checkout(args, cart, confirmation, daypart)
+        return cart, confirmation, daypart
+
+    def prepare_pickup(self, args):
+        from .pickup import preparation
+        cart, confirmation, daypart = self._checkout_data(args)
+        prepared = preparation(args, cart, confirmation, daypart)
+        # Match the same full-cart snapshot used by cart_get, including context.
+        when = pickup_time(args.pickup_at)
+        body = {"storeCode": args.store_code, "orderType": "1", "orderMode": "", "beCode": "",
+            "date": when.date().isoformat(), "time": when.strftime("%H:%M"), "cartType": "1", "channelCode": "03",
+            "pinId": "", "daypartCode": daypart}
+        prepared["snapshot_digest"] = fingerprint({"request": body, "cart": {k: v for k, v in cart.items() if k != "localDateTime"}})
+        return prepared
+
+    def switch_pickup(self, body):
+        from .pickup import SWITCH_PATH
+        return self.http.send("PUT", SWITCH_PATH, body=body)
+
+    def finish_pickup(self, args, prepared, receipt):
+        from .pickup import selected_quote, preparation
+        cart, confirmation, daypart = self._checkout_data(args)
+        current = preparation(args, cart, confirmation, daypart)
+        if any(current[k] != prepared[k] for k in ("cart_digest", "confirmation_digest")):
+            raise EzMcdError("pickup_cart_changed_get_new_quote")
+        return selected_quote(args, prepared, cart, receipt)
+
+    def revalidate_pickup_quote(self, quote):
+        from .models import CheckoutInput
+        from .pickup import preparation
+        args = CheckoutInput.model_validate(quote["request"])
+        cart, confirmation, daypart = self._checkout_data(args)
+        current = preparation(args, cart, confirmation, daypart)
+        if any(current[k] != quote["pickup_selection"][k] for k in ("cart_digest", "confirmation_digest")):
+            raise EzMcdError("pickup_cart_changed_get_new_quote")
+        return quote
 
     def simple_cart_draft(self, args, selections):
         if not 1 <= len(selections) <= 20:
@@ -317,7 +355,11 @@ class McdProvider:
         except (KeyError, TypeError, ValueError):
             raise EzMcdError("created_order_does_not_match_quote") from None
         if (order.get("orderId") != attempt["order_id"] or order.get("payId") != attempt["pay_id"]
-                or str(order.get("storeCode")) != quote["store_code"] or order.get("lockerOrder") is not True
+                or str(order.get("storeCode")) != quote["store_code"]
+                or quote.get("eat_type") not in ("locker-in", "take-in-store")
+                or order.get("lockerOrder") is not (quote.get("eat_type") == "locker-in")
+                or str(order.get("orderType")) != "1" or str(order.get("beType")) != "1"
+                or type(order.get("eatType")) is not int or order["eatType"] != 2 or order.get("dtStatus") not in (None, "")
                 or order.get("expectPickUpTime") != pickup_time(quote["pickup_at"]).strftime("%Y-%m-%d %H:%M:%S")
                 or cents(order.get("realTotalAmount")) != quote["amount_cents"] or expected != actual):
             raise EzMcdError("created_order_does_not_match_quote")

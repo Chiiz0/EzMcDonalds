@@ -19,6 +19,7 @@ def quote_summary(q):
         "wallet_sufficient": q["wallet_before_cents"] >= q["amount_cents"],
         "wallet_shortfall_cny": yuan(max(0, q["amount_cents"] - q["wallet_before_cents"])),
         "checkout_blockers": q.get("checkout_blockers", []),
+        "pickup_confirmation": q.get("pickup_confirmation"),
         "fresh_order_checks_still_required": True}
 
 
@@ -114,19 +115,31 @@ class Service:
         account, provider = self.provider(args.account)
         with self.store.lock(account["identity"]):
             q = provider.quote(args)
-            q.update(quote_id=uuid.uuid4().hex, account=args.account, request=args.model_dump(),
-                     expires_at=time.time() + 120, wallet_before_cents=provider.wallet()["balance_cents"],
-                     simulation=account["provider"] == "demo")
-            q["checkout_blockers"] = public_account(account, session_verified=True)["readiness"]["checkout_blockers"]
-            if q["wallet_before_cents"] < q["amount_cents"]:
-                q["checkout_blockers"].append("insufficient_wallet_balance")
-            try:
-                self.policy(account, q)
-            except EzMcdError as error:
-                if error.code not in q["checkout_blockers"] and not (error.code == "local_checkout_policy_required" and "checkout_disabled" in q["checkout_blockers"]):
-                    q["checkout_blockers"].append(error.code)
+            q = self._quote_metadata(account, provider, args, q)
             self.store.save_quote(account["identity"], q)
         return quote_summary(q)
+
+    def _quote_metadata(self, account, provider, args, q):
+        q.update(quote_id=uuid.uuid4().hex, account=args.account, request=args.model_dump(),
+                 expires_at=time.time() + 120, wallet_before_cents=provider.wallet()["balance_cents"],
+                 simulation=account["provider"] == "demo")
+        q["checkout_blockers"] = public_account(account, session_verified=True)["readiness"]["checkout_blockers"]
+        if q["wallet_before_cents"] < q["amount_cents"]:
+            q["checkout_blockers"].append("insufficient_wallet_balance")
+        try:
+            self.policy(account, q)
+        except EzMcdError as error:
+            if error.code not in q["checkout_blockers"] and not (error.code == "local_checkout_policy_required" and "checkout_disabled" in q["checkout_blockers"]):
+                q["checkout_blockers"].append(error.code)
+        return q
+
+    def quote_pickup(self, args, cart_ref, key):
+        from .pickup import PickupQuotes
+        return PickupQuotes(self).prepare(args, cart_ref, key)
+
+    def pickup_quote_status(self, alias, operation_id=None):
+        from .pickup import PickupQuotes
+        return PickupQuotes(self).status(alias, operation_id)
 
     def add_simple_items(self, args, items, request_key):
         return self._add_items(args, items, request_key, configured=False)
@@ -206,10 +219,13 @@ class Service:
             existing = self.store.existing(identity, request_key, q["intent"])
             if existing:
                 return self._status(account, provider, existing)
+            if self.store.pending_pickup_quote(identity):
+                raise EzMcdError("pickup_preparation_unresolved_review_cart")
             policy = self.policy(account, q)
             if time.time() >= q["expires_at"]:
                 raise EzMcdError("quote_expired_get_new_quote")
-            fresh = provider.quote(CheckoutInput.model_validate(q["request"]))
+            fresh = (provider.revalidate_pickup_quote(q) if q.get("pickup_selection") else
+                     provider.quote(CheckoutInput.model_validate(q["request"])))
             if fresh["checkout_digest"] != q["checkout_digest"] or fresh["intent"] != q["intent"]:
                 raise EzMcdError("checkout_changed_get_new_quote")
             provider.preflight(q)

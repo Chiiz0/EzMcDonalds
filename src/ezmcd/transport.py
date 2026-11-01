@@ -28,6 +28,7 @@ READS = {
     "/bff/cashier/channels": ("1001", "501"),
 }
 WRITES = {("PUT", "/bff/cart/carts"): None,
+          ("PUT", "/bff/order/confirmation/eattype/switch"): ("1029", "202"),
           ("PUT", "/bff/cart/carts/empty"): ("1003", "200"),
           ("POST", "/bff/passport/login/session/refresh"): ("1006", "500"),
           ("POST", "/bff/order/orders"): ("1012", "202"),

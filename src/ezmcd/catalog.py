@@ -157,8 +157,8 @@ def pickup_methods(args, confirmation, daypart):
         "requested_method_available": args.eat_type in codes, "requested_method_selected": matches,
         "selected_method": chosen[0] if chosen else None,
         "methods": [{"code": row["code"], "name": row.get("text", ""), "description": row.get("subText", ""),
-                     "selected": row.get("selected", False), "checkout_supported": row["code"] == "locker-in"} for row in rows],
-        "next_action": "checkout_quote" if matches else "select_requested_method_in_official_app" if args.eat_type in codes
+                     "selected": row.get("selected", False), "checkout_supported": row["code"] in ("locker-in", "take-in-store")} for row in rows],
+        "next_action": "checkout_quote" if matches else "checkout_quote_pickup" if args.eat_type in codes
                        else "use_official_app_or_choose_supported_store",
         "cart_changed": False, "order_created": False, "payment_attempted": False,
         "quote_and_policy_checks_still_required": True}

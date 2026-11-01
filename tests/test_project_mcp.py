@@ -131,3 +131,29 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 text = result.content[0].text
                 self.assertIn("invalid_account_alias", text)
                 self.assertNotIn(temporary, text)
+
+    async def test_counter_quote_survives_stdio_restart_and_can_pay_in_simulation(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store = Store(Path(folder)); setup_demo(store)
+            params = StdioServerParameters(command=sys.executable, args=["-m", "ezmcd.mcp_server"], env={"EZMCD_DATA_DIR": folder})
+            when = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
+            request = {"account": "demo", "store_code": "9000001", "pickup_at": when.isoformat(),
+                       "max_amount_cny": "20", "eat_type": "take-in-store"}
+            async with Client(params) as client:
+                definitions = {t.name: t for t in (await client.list_tools()).tools}
+                self.assertFalse(definitions["checkout_quote_pickup"].annotations.read_only_hint)
+                self.assertTrue(definitions["checkout_quote_pickup"].annotations.destructive_hint)
+                self.assertTrue(definitions["checkout_quote_pickup_status"].annotations.read_only_hint)
+                cart = json.loads((await client.call_tool("cart_get", {"request": request})).content[0].text)
+                arguments = {"request": request, "cart_ref": cart["cart_ref"], "idempotency_key": "counter-quote"}
+                first = json.loads((await client.call_tool("checkout_quote_pickup", arguments)).content[0].text)
+                self.assertEqual(first["state"], "READY")
+            async with Client(params) as client:
+                recovered = json.loads((await client.call_tool("checkout_quote_pickup_status", {"account": "demo"})).content[0].text)
+                repeated = json.loads((await client.call_tool("checkout_quote_pickup", arguments)).content[0].text)
+                self.assertEqual({first["quote_id"], recovered["quote_id"], repeated["quote_id"]}, {first["quote_id"]})
+                self.assertFalse(repeated["switch_attempted"])
+                paid = json.loads((await client.call_tool("checkout_submit", {
+                    "account": "demo", "quote_id": recovered["quote_id"], "idempotency_key": "counter-buy"})).content[0].text)
+                self.assertTrue(paid["paid_verified"])
+                self.assertTrue(paid["simulation"])

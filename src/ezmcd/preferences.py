@@ -79,7 +79,7 @@ class MealPreferences(BaseModel):
     timezone: Literal["Asia/Shanghai"] = "Asia/Shanghai"
     max_amount_cny: str
     require_card_discount: bool = False
-    eat_type: Literal["locker-in"] = "locker-in"
+    eat_type: Literal["locker-in", "take-in-store"] = "locker-in"
 
     @field_validator("weekdays")
     @classmethod

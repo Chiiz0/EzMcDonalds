@@ -25,7 +25,8 @@ class PickupMethodsTests(unittest.TestCase):
         self.assertFalse(result["requested_method_selected"])
         self.assertEqual(result["selected_method"], "eat-in")
         self.assertEqual(result["next_action"], "use_official_app_or_choose_supported_store")
-        self.assertTrue(all(not row["checkout_supported"] for row in result["methods"]))
+        self.assertFalse(result["methods"][0]["checkout_supported"])
+        self.assertTrue(result["methods"][1]["checkout_supported"])
         self.assertEqual(self.confirmation, before)
 
     def test_available_and_selected_are_separate(self):
@@ -34,7 +35,7 @@ class PickupMethodsTests(unittest.TestCase):
         result = pickup_methods(self.args, self.confirmation, "2")
         self.assertTrue(result["requested_method_available"])
         self.assertFalse(result["requested_method_selected"])
-        self.assertEqual(result["next_action"], "select_requested_method_in_official_app")
+        self.assertEqual(result["next_action"], "checkout_quote_pickup")
         rows[0]["selected"] = False
         rows[2]["selected"] = True
         result = pickup_methods(self.args, self.confirmation, "2")
@@ -73,11 +74,12 @@ class PickupMethodsTests(unittest.TestCase):
 class CreatedOrderComponentsTests(unittest.TestCase):
     def setUp(self):
         self.attempt = {"order_id": "order-test", "pay_id": "pay-test", "wallet_before_cents": 10000}
-        self.quote = {"store_code": "9000001", "pickup_at": "2099-01-01T10:15:00+08:00", "amount_cents": 1800,
+        self.quote = {"store_code": "9000001", "pickup_at": "2099-01-01T10:15:00+08:00", "amount_cents": 1800, "eat_type": "locker-in",
             "items": [{"product_code": code, "quantity": qty,
                        "components": [{"round": 1, "comboProducts": [{"code": part, "quantity": 1}]}]}
                       for code, qty, part in (("7001", 1, "101"), ("7002", 2, "102"))]}
         self.order = {"orderId": "order-test", "payId": "pay-test", "storeCode": "9000001", "lockerOrder": True,
+            "orderType": "1", "beType": "1", "eatType": 2,
             "expectPickUpTime": "2099-01-01 10:15:00", "realTotalAmount": "18.00", "realPayAmount": "",
             "orderStatusTitle": "待支付", "leftPaySecond": 500,
             "orderProductList": [{"productCode": code, "quantity": qty,

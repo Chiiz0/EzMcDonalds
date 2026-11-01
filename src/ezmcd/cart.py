@@ -31,6 +31,8 @@ class CartAdditions:
                 raise EzMcdError("legacy_cart_write_query_only")
             if self.store.pending_cart_addition(identity):
                 raise EzMcdError("cart_addition_unresolved_query_status")
+            if self.store.pending_pickup_quote(identity):
+                raise EzMcdError("pickup_preparation_unresolved_review_cart")
             _, provider = self.service.provider(args.account)
             draft = (provider.configured_cart_draft if configured else provider.simple_cart_draft)(args, items)
             record = {"operation_id": operation, "request_digest": intent, "created_at": time.time(),
