@@ -150,7 +150,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                                            env={"EZMCD_DATA_DIR": str(store.root)})
             async with Client(params) as client:
                 tool_map = {t.name: t for t in (await client.list_tools()).tools}
-                self.assertEqual(len(tool_map), 36)
+                self.assertEqual(len(tool_map), 38)
                 self.assertTrue(tool_map["cart_operations_list"].annotations.read_only_hint)
                 self.assertFalse(tool_map["cart_operations_list"].annotations.open_world_hint)
                 self.assertTrue(tool_map["cart_operation_retire"].annotations.destructive_hint)

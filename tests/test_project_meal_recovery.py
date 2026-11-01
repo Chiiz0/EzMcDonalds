@@ -78,7 +78,7 @@ class MealRecoveryTests(unittest.TestCase):
             with self.subTest(state=state), patch.object(Service, "provider", side_effect=AssertionError("No provider")):
                 result = self.plan()
                 self.assertEqual(result["existing_orders"][0]["state"], state)
-                self.assertEqual(result["existing_orders"][0]["next_action"], "review_in_official_app")
+                self.assertEqual(result["existing_orders"][0]["next_action"], "official_orders_list")
                 self.assertFalse(result["selection_ready"])
                 self.assertNotIn("private-", json.dumps(result))
 

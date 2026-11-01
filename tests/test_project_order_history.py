@@ -71,7 +71,7 @@ class OrderHistoryTests(unittest.TestCase):
         self.assertEqual(row["attempt_id"], attempt["attempt_id"])
         self.assertIsNone(row["order_id"])
         self.assertFalse(row["automatic_write_retry"])
-        self.assertEqual(row["next_action"], "review_in_official_app")
+        self.assertEqual(row["next_action"], "official_orders_list")
 
     def test_filters_and_pagination_never_hide_other_accounts_in_total(self):
         first = self.seed("UNKNOWN")

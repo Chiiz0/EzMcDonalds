@@ -8,6 +8,14 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "invalid_official_order_id": ("官方订单编号无效。", "从同账号的 official_orders_list 复制完整 order_id；不要填写链接或付款引用。"),
+        "invalid_official_order_pagination": ("官方订单分页参数无效。", "page 为1至100，limit 为1至20；列表不保证包含账号的全部历史。"),
+        "official_order_response_schema_changed": ("官方订单详情包含尚未识别的数据结构。", "保留原购买记录，在官方入口核对；没有据此关联订单或尝试付款。"),
+        "official_order_list_schema_changed": ("官方订单列表结构暂不支持。", "在官方入口查看本次结果；空列表或解析失败都不能当作下单失败。"),
+        "official_order_list_identity_duplicated": ("官方列表出现重复的订单编号。", "停止据此判断订单数量，单独核对原订单；不要创建替代订单。"),
+        "official_order_identity_changed": ("返回的订单与所选编号不一致。", "停止核对，重新查看同账号官方订单列表；不根据这份响应付款。"),
+        "official_cashier_identity_changed": ("收银台返回了不同的订单或付款引用。", "保留原记录，在官方入口核对状态；不把它视为付款成功。"),
+        "official_cashier_response_schema_changed": ("暂时无法识别该订单的收银台状态。", "稍后只读查询原订单，或到官方入口核对；不重发付款。"),
         "runtime_already_available_use_account_check": ("当前会话已有近期运行字段。", "无需恢复旧样本；用 account_check 核对会话，之后按原消费策略和实时报价继续。"),
         "previous_runtime_unavailable_update_official_evidence": ("没有可恢复的同设备近期运行样本。", "用 account_diagnose 核对状态。旧样本缺失、超过24小时或设备字段变化时，通过官方 App 的授权采样更新；不修改采样日期。"),
         "cart_key_reused_for_different_request": ("同一加购幂等键对应了不同的请求。", "用 cart_add_status 查原操作；不要修改商品、门店、时段或预算后沿用原键。"),

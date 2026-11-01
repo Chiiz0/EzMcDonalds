@@ -29,7 +29,7 @@ def attempt_summary(a):
     next_action = ("query_order_status" if a.get("status_query_failed") else
                    "review_cancelled_order" if a.get("state") == "CANCELLED" else
                    "query_pickup_code_later" if pickup_pending else "collect_at_pickup_time" if paid else
-                   "query_order_status" if a.get("order_id") else "review_in_official_app")
+                   "query_order_status" if a.get("order_id") else "official_orders_list")
     return {k: a.get(k) for k in ("attempt_id", "state", "order_id", "pickup_code", "pickup_at", "store_code", "paid_verified", "stop_reason", "simulation", "status_query_failed", "status_checked_at")} | {
         "amount_cny": yuan(a["amount_cents"]), "automatic_write_retry": False,
         "pickup_code_pending": pickup_pending, "next_action": next_action,
@@ -57,7 +57,7 @@ class Service:
     def _local_order(self, identity, attempt):
         row = attempt_summary(attempt) | {"store_name": None, "items": None, "discount_names": None,
             "meal_details_available": False,
-            "next_action": "query_order_status" if attempt.get("order_id") else "review_in_official_app"}
+            "next_action": "query_order_status" if attempt.get("order_id") else "official_orders_list"}
         try:
             quote = self.store.quote(identity, attempt["quote_id"])
         except EzMcdError as error:
@@ -74,6 +74,58 @@ class Service:
         account = self.store.account(alias)
         return [self._local_order(account["identity"], a) for a in
                 self.store.attempts_at_pickup(account["identity"], store_code, pickup_at)]
+
+    def official_orders(self, alias, page=1, limit=10):
+        from .order_views import pagination
+        pagination(page, limit)
+        account, provider = self.provider(alias)
+        return provider.official_orders(page, limit) | self._official_read_metadata(account)
+
+    @staticmethod
+    def _official_read_metadata(account):
+        return {"account": account["alias"], "source": "offline_demo" if account["provider"] == "demo" else "official_account_api", "checked_at": time.time(),
+            "simulation": account["provider"] == "demo", "pickup_timezone": "Asia/Shanghai",
+            "local_records_changed": False, "order_created": False, "payment_attempted": False,
+            "automatic_write_retry": False}
+
+    def official_order(self, alias, identifier, attempt_id=None):
+        from .order_views import order_id, public_order, text
+        order_id(identifier)
+        # Resolve an optional comparison before networking, with the existing
+        # member-scoped journal boundary. A match never binds or pays an order.
+        record = self.store.account(alias)
+        attempt = self.store.attempt(record["identity"], attempt_id) if attempt_id else None
+        quote = self.store.quote(record["identity"], attempt["quote_id"]) if attempt else None
+        account, provider = self.provider(alias)
+        raw, cashier = provider.official_order(identifier)
+        if raw.get("orderId") != identifier:
+            raise EzMcdError("official_order_identity_changed")
+        result = public_order(raw, detail=True)
+        try:
+            status = text(cashier["payStatus"], 40)
+            if not status: raise ValueError
+        except (AttributeError, KeyError, TypeError, ValueError):
+            raise EzMcdError("official_cashier_response_schema_changed") from None
+        result.update(cashier_status=status, payment_verification="official_report_only_not_local_wallet_reconciliation",
+                      local_attempt_comparison=None)
+        if attempt:
+            comparison = {"attempt_id": attempt_id, "order_fields_match": False,
+                "compared_fields": ["store", "pickup_time", "pickup_method", "amount", "products", "component_quantities"],
+                "not_verified": ["discount_identity", "customizations", "request_origin"],
+                "already_linked": attempt.get("order_id") == identifier and bool(attempt.get("pay_id")) and attempt["pay_id"] == raw.get("payId"),
+                "association_changed": False, "matching_content_proves_origin": False, "reason": None}
+            if attempt.get("order_id") and attempt["order_id"] != identifier:
+                comparison["reason"] = "local_attempt_already_has_another_order"
+            elif attempt.get("pay_id") and attempt["pay_id"] != raw.get("payId"):
+                comparison["reason"] = "local_payment_reference_mismatch"
+            else:
+                try:
+                    provider.validate_order(attempt | {"order_id": identifier, "pay_id": raw.get("payId")}, quote, raw)
+                    comparison["order_fields_match"] = True
+                except EzMcdError as error:
+                    comparison["reason"] = error.code
+            result["local_attempt_comparison"] = comparison
+        return result | self._official_read_metadata(account)
 
     def provider(self, alias):
         account = self.store.account(alias)

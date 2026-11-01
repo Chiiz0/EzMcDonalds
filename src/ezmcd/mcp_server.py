@@ -48,6 +48,7 @@ def build_server(service):
         "For variants absent from the menu, use product_detail's validated parent_detail_selection and preserve variant_of plus the parent offer_id in cart_add_configured. Related offers are not selected automatically; parent card/coupon identifiers are never borrowed. "
         "Use a stable idempotency key per user purchase. "
         "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
+        "Use official_orders_list and official_order_detail to inspect live account orders, including App-only orders or possible candidates after a lost create reply. Optional attempt comparison reports limited matching fields; it never establishes request origin, links records or authorizes payment. Sale/creation time is not pickup time. "
         "After any ambiguous result query order_status; never create a replacement to retry payment. "
         "simulation=true means an offline demo, never a real order.")
 
@@ -84,6 +85,7 @@ def build_server(service):
             "real_e2e_evidence": "public core through stdio MCP: one SMS-authorized account, one store, breakfast-card combo, CNY12.60 McWallet payment; duplicate after restart returned the same paid order without new writes; counter pickup and other meal/store payments unverified",
             "payment_settlement": "successful consume followed by at most four read-only status checks, with 1/2/4 second delays; UNKNOWN is query-only, never a reason to repeat payment",
             "order_recovery": "orders_list finds local attempts by account, pickup date and state; works offline after session expiry/revocation; order_status queries the original order live",
+            "official_order_history": "paged live account list and exact detail/cashier GETs; includes App-only orders, redacts payment references/contact fields; optional local comparison lists verified and unverified fields without binding or paying; real paging and original-order detail verified",
             "automatic_retries": False, "automatic_schedule": False}
 
     @server.tool(annotations=READ)
@@ -323,6 +325,18 @@ def build_server(service):
                     limit: int = 20, offset: int = 0) -> dict:
         """Recover LOCAL purchase attempts after lost context. No network or valid login needed. Optional YYYY-MM-DD pickup date (Asia/Shanghai) and exact state; limit 1..100, offset 0..10000. Newest pickup date then recorded order first. Includes unknown/cancelled attempts; missing order_id requires official review. Snapshots may be stale: query order_status for live confirmation. Does not include purchases made only in the official App."""
         return service.orders(account, pickup_date=pickup_date, state=state, limit=limit, offset=offset)
+
+    @server.tool(annotations=READ)
+    @protected
+    def official_orders_list(account: str, page: int = 1, limit: int = 10) -> dict:
+        """Read a live page of this member's official orders, including orders not in the local journal. page 1..100, limit 1..20. A full page may have more; no total/completeness claim. Sale/creation time is not pickup time: use official_order_detail. Never creates, pays, cancels or links purchases."""
+        return service.official_orders(account, page, limit)
+
+    @server.tool(annotations=READ)
+    @protected
+    def official_order_detail(account: str, order_id: str, attempt_id: str | None = None) -> dict:
+        """Read the exact official order and cashier status. Show meal, amount, pickup arrangement/code without payment references or contact details. Optionally compare with a local attempt's quote; matching content alone does not prove origin, link the order or authorize payment. Does not replace order_status for an already-linked purchase."""
+        return service.official_order(account, order_id, attempt_id)
 
     return server
 

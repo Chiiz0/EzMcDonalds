@@ -369,6 +369,27 @@ class McdProvider:
         cashier = self.get("/bff/cashier/" + attempt["pay_id"] + "/status", {"source": "0"})
         return {"order": order, "cashier": cashier, "wallet_cents": self.wallet()["balance_cents"]}
 
+    def official_orders(self, page, limit):
+        from .order_views import public_orders, pagination
+        pagination(page, limit)
+        return public_orders(self.get("/bff/order/orders", {"orderCategoryId": "0", "page": str(page), "size": str(limit)}), page, limit)
+
+    def official_order(self, identifier):
+        from .order_views import order_id
+        order_id(identifier)
+        raw = self.get("/bff/order/orders/" + identifier)
+        if not isinstance(raw, dict) or raw.get("orderId") != identifier:
+            raise EzMcdError("official_order_identity_changed")
+        # The payment reference is obtained only from the authenticated detail
+        # and stays inside this provider. No wallet token or balance is needed.
+        pay_id = order_id(raw.get("payId"))
+        cashier = self.get("/bff/cashier/" + pay_id + "/status", {"source": "0"})
+        if not isinstance(cashier, dict):
+            raise EzMcdError("official_cashier_response_schema_changed")
+        if any(key in cashier and cashier[key] != value for key, value in (("orderId", identifier), ("payId", pay_id))):
+            raise EzMcdError("official_cashier_identity_changed")
+        return raw, cashier
+
     @staticmethod
     def validate_order(attempt, quote, order):
         try:

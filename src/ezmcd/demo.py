@@ -226,3 +226,18 @@ class DemoProvider:
         order = state["orders"][attempt["order_id"]]
         return {"order": deepcopy(order), "wallet_cents": state["balance"],
                 "cashier": {"payStatus": "PAID" if order["realPayAmount"] else "PAYING"}}
+
+    def official_orders(self, page, limit):
+        from .order_views import pagination, public_orders
+        pagination(page, limit)
+        rows = list(reversed(list(self.read()["orders"].values())))
+        rows = [r | self.store(r["storeCode"]) for r in rows[(page-1)*limit:page*limit]]
+        return public_orders({"list": rows}, page, limit)
+
+    def official_order(self, identifier):
+        from .order_views import order_id
+        order_id(identifier)
+        order = self.read()["orders"].get(identifier)
+        if order is None:
+            raise EzMcdError("demo_order_not_found")
+        return deepcopy(order) | self.store(order["storeCode"]), {"payStatus": "PAID" if order["realPayAmount"] else "PAYING"}

@@ -14,7 +14,7 @@
 
 ## 同一餐已经下过单
 
-`existing_purchase=true` 表示该账号、门店、取餐时间已有本地购买记录。此时 `selection_ready=false`、`quote_required=false`、`items=[]`，`existing_orders` 提供原尝试、原餐品、金额和下一步。Agent 应核对原记录，按其中的 `attempt_id` 调用 `order_status`；没有订单号的未知尝试须在官方入口核对，不能换 key 再买。
+`existing_purchase=true` 表示该账号、门店、取餐时间已有本地购买记录。此时 `selection_ready=false`、`quote_required=false`、`items=[]`，`existing_orders` 提供原尝试、原餐品、金额和下一步。Agent 应核对原记录，按其中的 `attempt_id` 调用 `order_status`；没有订单号的未知尝试可用 `official_orders_list` / `official_order_detail` 查看候选，或在官方 App 核对，不能换 key 再买。
 
 该检查发生在联网之前，因此账号退出、会话过期或刷新未完成时仍能找回。明确传入过去日期也可恢复该餐，即使偏好的星期已经改变。不传日期则先检查下一次未来的偏好星期和时间，不会用昨天的早餐替代下一餐；门店实际可预约日期仍以实时接口为准。
 

@@ -113,6 +113,14 @@ def main():
     history.add_argument("--state", choices=("RESERVED", "CREATED", "PAYMENT_ATTEMPTED", "UNKNOWN", "PAID", "CANCELLED"))
     history.add_argument("--limit", type=int, default=20)
     history.add_argument("--offset", type=int, default=0)
+    live_history = commands.add_parser("orders-live", help="Read a page of official account orders; requires a valid session")
+    live_history.add_argument("account")
+    live_history.add_argument("--page", type=int, default=1)
+    live_history.add_argument("--limit", type=int, default=10)
+    order_view = commands.add_parser("order-view", help="Read official detail/cashier; optional local comparison never binds or pays")
+    order_view.add_argument("account")
+    order_view.add_argument("order_id")
+    order_view.add_argument("--attempt-id")
     commands.add_parser("mcp-config")
     diagnose = commands.add_parser("doctor", help="Check local setup; optionally verify existing account sessions without purchases")
     diagnose.add_argument("--account")
@@ -240,6 +248,10 @@ def main():
             result = service.submit(args.account, args.quote_id, args.idempotency_key)
         elif args.command == "orders":
             result = service.orders(args.account, pickup_date=args.pickup_date, state=args.state, limit=args.limit, offset=args.offset)
+        elif args.command == "orders-live":
+            result = service.official_orders(args.account, args.page, args.limit)
+        elif args.command == "order-view":
+            result = service.official_order(args.account, args.order_id, args.attempt_id)
         elif args.command == "cart-status":
             result = service.cart_add_status(args.account, args.operation_id)
         elif args.command == "cart-operations":

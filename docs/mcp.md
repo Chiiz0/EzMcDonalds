@@ -62,6 +62,8 @@
 | `order_pay` | 支付尚未开始付款的CREATED订单 | **真实消费**；已有尝试只查询 |
 | `order_status` | 订单、付款、余额、取餐码 | 只读 |
 | `orders_list` | 按账号、取餐日期、状态分页找回本地购买记录 | 本地只读，无网络；不是实时或完整官方订单列表 |
+| `official_orders_list` | 分页读取当前会员官方订单，包括仅在 App 下的单 | 只读 GET，需有效会话；不声明完整历史 |
+| `official_order_detail` | 原订单详情、收银台状态、取餐信息；可与本地尝试比对部分字段 | 只读 GET，不关联、不付款、不取消 |
 
 [工具行为注解](https://py.sdk.modelcontextprotocol.io/servers/tools/)用于提示客户端，不代替本机策略和持久化去重。
 
@@ -109,7 +111,7 @@
 
 消费接口成功后，最多核对四次同一订单，中间等待1、2、4秒；一旦成功、取消或查询失败即停止等待。等待只查询订单、收银台和余额，不重发订单、预支付或消费。结果给出 `next_action`：`query_order_status` 继续查原订单；`query_pickup_code_later` 表示付款已核验但取餐码待生成；`review_in_official_app` 用于缺少订单回执、无法关联的情况。手动 `order_status` 每次只核对一次。
 
-下单回执丢失时`order_id`可能为空，保留`attempt_id`，通过官方订单列表人工核对，当前版本不自动猜测关联。`pickup_code=null`表示尚未生成。
+下单回执丢失时`order_id`可能为空，保留`attempt_id`。可用 `official_orders_list` 查官方候选，再用 `official_order_detail(account, order_id, attempt_id?)` 查看详情并比对限定字段；内容相同不证明请求来源，不自动关联或付款。`pickup_code=null`表示尚未生成。列表的创建/成交时间不是预约取餐时间，后者以详情为准。
 
 聊天或进程重启后可用 `orders_list(account, pickup_date?, state?, limit=20, offset=0)` 找回原尝试。日期为北京时间 `YYYY-MM-DD`，状态为大写原始状态，limit 范围1至100，offset 范围0至10000。列表按取餐日期降序、同日按记录顺序倒序；包含未知及取消记录。`source=local_project_journal`、`live_status_checked=false` 表示所有状态、取餐码和余额都是历史记录，下一步必须查询原订单的 `order_status`。`status_checked_at` 是最后成功核对的 Unix 秒时间，旧记录可为空。
 
