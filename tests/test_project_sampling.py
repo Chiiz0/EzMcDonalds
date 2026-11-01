@@ -71,6 +71,32 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(self.calls,[])
         self.process.terminate.assert_not_called()
 
+    def test_already_captured_runtime_does_not_invite_another_submission(self):
+        self.run_capture()
+        balance=next(c.args[0] for c in self.capture.report.call_args_list if c.args[0]['stage']=='BALANCE_CAPTURED')
+        self.assertFalse(balance['capture_window_active'])
+        self.assertIn('不要继续提交',balance['next'])
+
+    def test_live_balance_reports_remaining_window_without_claiming_complete_capture(self):
+        write_private(self.capture.directory/'audit.json', {'runtime_saved':False,'balance_saved':True,'allowed_gets':1})
+        result=self.run_capture()
+        balance=next(c.args[0] for c in self.capture.report.call_args_list if c.args[0]['stage']=='BALANCE_CAPTURED')
+        self.assertTrue(balance['capture_window_active'])
+        self.assertTrue(0 < balance['seconds_remaining'] <= 120)
+        self.assertEqual(result['capture_state'],'runtime_missing')
+
+    def test_balance_observed_after_window_does_not_invite_submission(self):
+        write_private(self.capture.directory/'audit.json', {'runtime_saved':False,'balance_saved':True,'allowed_gets':1})
+        clock=[0]
+        def tick(_):
+            if not self.started:self.running=True;self.started=True;clock[0]=121
+            else:self.running=False
+        with patch('ezmcd.sampling.time.time',side_effect=lambda:clock[0]), patch('ezmcd.sampling.time.sleep',side_effect=tick):
+            self.run_capture()
+        balance=next(c.args[0] for c in self.capture.report.call_args_list if c.args[0]['stage']=='BALANCE_CAPTURED')
+        self.assertEqual(balance['seconds_remaining'],0)
+        self.assertFalse(balance['capture_window_active'])
+
     def test_preflight_failure_leaves_proxy_untouched(self):
         self.capture.probe.side_effect=EzMcdError('sampling_guard_preflight_failed')
         with self.assertRaisesRegex(EzMcdError,'sampling_guard_preflight_failed'):self.run_capture()

@@ -42,6 +42,7 @@ def error_result(code):
         "cart_clear_not_confirmed_query_only": ("尚未确认购物车已清空。", "先 cart_get 查看当前内容；不要自动重发清空请求或继续加购。"),
         "sampling_options_invalid": ("采样参数不正确。", "使用实际 macOS 网络服务名称；采样时长为30至120秒。"),
         "sampling_cancelled_before_start": ("已在正式采样前取消。", "系统代理未启用；可以保持官方 App 关闭或正常使用。"),
+        "sampling_interactive_terminal_required": ("交互采样需要本人本机的输入与提示终端。", "在本机终端运行 sampling-capture --interactive；自动化调用不要添加此选项。最终JSON可重定向保存，但输入和stderr提示不能被管道替代。"),
         "sampling_mitmproxy_required": ("未找到可执行的 mitmdump。", "使用 Python 3.12+ 安装项目的 sampling 额外依赖；或用 --mitmdump 指向本机已安装的程序。"),
         "sampling_existing_proxy_requires_review": ("当前网络已有代理或不能完整恢复原配置。", "先在本机确认网络代理；采样器不会覆盖活动 HTTP、HTTPS、SOCKS 或自动代理配置。"),
         "sampling_close_official_app_first": ("官方 App 仍在运行。", "先退出麦当劳清除旧连接；若正常退出卡住，只强制退出麦当劳，再启动采样。"),

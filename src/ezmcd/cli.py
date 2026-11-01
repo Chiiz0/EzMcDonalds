@@ -28,6 +28,7 @@ def main():
     sampling.add_argument("--mitmdump", help="Path to your installed mitmdump; otherwise uses PATH")
     sampling.add_argument("--refresh-from", help="Private recent signed balance sample for one matching native session refresh")
     sampling.add_argument("--update-account", action="store_true", help="After proxy cleanup, verify and atomically import this capture for the same member")
+    sampling.add_argument("--interactive", action="store_true", help="Wait for Enter in a local terminal, then show live human-readable steps on stderr; final JSON stays on stdout")
     sampling_import = commands.add_parser("sampling-import", help="Resume a completed local capture import; only reads upstream, never starts a proxy")
     sampling_import.add_argument("alias")
     sampling_import.add_argument("capture_directory")
@@ -146,8 +147,18 @@ def main():
             result = getattr(SamplingCertificate(store), args.certificate_action)()
         elif args.command == "sampling-capture":
             from .sampling import RuntimeCapture
-            result = RuntimeCapture(store, args.alias, service=args.network_service, seconds=args.seconds,
-                mitmdump=args.mitmdump, refresh_from=args.refresh_from).run()
+            console = None
+            if args.interactive:
+                from .sampling_console import SamplingConsole
+                record = store.account(args.alias)
+                if record.get("revoked") or record["provider"] != "mcd-cn":
+                    raise EzMcdError("active_official_account_required_for_runtime_update")
+                console = SamplingConsole()
+            capture = RuntimeCapture(store, args.alias, service=args.network_service, seconds=args.seconds,
+                mitmdump=args.mitmdump, refresh_from=args.refresh_from, report=console)
+            if console:
+                console.ready(args.alias, args.seconds)
+            result = capture.run()
             if args.update_account and result.get("runtime_saved") and result.get("balance_saved"):
                 from .sampling_import import import_capture
                 result |= import_capture(store, args.alias, result["capture_directory"])

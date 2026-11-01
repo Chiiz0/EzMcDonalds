@@ -68,7 +68,7 @@ ezmcd account check personal
 
 Mac 已有账号可使用[无订单采样命令](guarded-capture.md)：复用持久证书，在发送前阻断订单并保存本人签名样本。采样核心已实机验证，无新增订单或扣款；仍需人在官方 App 操作与关闭 App，不是无人值守续期。
 
-使用 `ezmcd sampling-capture personal --update-account` 可在代理恢复后自动完成两个只读核验并导入，省去手动复制样本文件路径。导入失败可用输出目录运行 `ezmcd sampling-import personal /absolute/path/data/captures/采样编号`，保留旧账号并继续核验；成功后重复调用不重写凭据。它仍保留原采样期限和消费策略。
+在本机终端使用 `ezmcd sampling-capture personal --interactive --update-account`，先读准备步骤并按回车，再在同一终端按实时中文提示完成采样。代理恢复后自动完成两个只读核验并导入，省去手动复制样本文件路径。导入失败可用输出目录运行 `ezmcd sampling-import personal /absolute/path/data/captures/采样编号`，保留旧账号并继续核验；成功后重复调用不重写凭据。它仍保留原采样期限和消费策略。
 
 已有本人近期官方样本时，无需重新导入整个账号：
 

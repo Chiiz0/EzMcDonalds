@@ -1,6 +1,7 @@
 """Explicit, bounded macOS capture. Never exposes OS proxy control to MCP."""
 import http.client
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -194,7 +195,12 @@ class RuntimeCapture:
             while self.app_running():
                 state = read_private(self.directory / "audit.json")
                 if state["balance_saved"] and not balance_announced:
-                    self.report({"stage": "BALANCE_CAPTURED", "next": "本人余额样本已校验。可在保护窗口内进入确认页；提交请求会被阻断。"})
+                    seconds_remaining = max(0, math.ceil(deadline - time.time()))
+                    active = bool(seconds_remaining and not stop and not state["runtime_saved"] and process.poll() is None)
+                    self.report({"stage": "BALANCE_CAPTURED", "seconds_remaining": seconds_remaining,
+                        "capture_window_active": active,
+                        "next": "本人余额样本已校验。可在当前保护窗口内进入确认页；提交请求会被阻断。" if active
+                                else "余额样本已校验，本轮正在收尾。不要继续提交；请退出官方 App。"})
                     balance_announced = True
                 if (stop or time.time() > deadline or state["runtime_saved"] or process.poll() is not None) and not warned:
                     self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next": "请退出麦当劳；若卡住，只强制退出麦当劳。关闭后才恢复代理。"})
