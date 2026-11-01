@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a4`：本地 Python CLI + 24 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、套餐偏好、实时选餐方案、消费策略和防重复日志。
+**当前版本 `0.1.0a5`：本地 Python CLI + 24 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、套餐偏好、实时选餐方案、消费策略和防重复日志。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；下单运行字段尚不能自动更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
@@ -45,7 +45,7 @@ chmod 600 /absolute/path/account.har
 .venv/bin/ezmcd account check personal
 ```
 
-已有验证过的会话可用 `account import --profile ...`。真实下单还要求同会话、24 小时内的官方 v5 运行字段；缺失时只能查询。**当前无法承诺一次接入后长期无人值守点餐。** 不应为取得采样而额外创建订单；接入格式、依赖和更新流程见[账号接入](docs/onboarding.md)。
+已有验证过的会话可用 `account import --profile ...`。真实下单还要求 24 小时内的官方 v5 运行字段；可导入同会话样本，或在本机显式复用同一官方设备字段的近期样本并做 v5 只读核验。缺失时仍可找店、选餐、加购和报价。**当前无法承诺一次接入后长期无人值守点餐。** 不应为取得采样而额外创建订单；接入格式、依赖和更新流程见[账号接入](docs/onboarding.md)。
 
 已有本人官方设备上下文后，可为自己控制的已注册会员账号执行纯脚本短信登录：
 

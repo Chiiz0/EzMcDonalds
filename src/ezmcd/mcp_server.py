@@ -52,8 +52,9 @@ def build_server(service):
             "stores": "city/name search or explicit coordinates, favorites, live pickup slots; compatible locker pickup required",
             "meal_preferences": "local saved choices and read-only live meal_plan; no purchase authorization or scheduling",
             "membership_assets": "card validity and coupon category counts; actual eligibility from live menu and quote",
-            "products": "ordinary items and combos; fresh product_detail and cart_add_configured support standard component choices",
-            "combo_configuration": "explicit choices for each round; advanced modifications use the official cart",
+            "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
+            "combo_configuration": "explicit choices for each round; supported free binary modifiers can be kept/removed; unknown or paid modifications use the official cart",
+            "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; reused-context order POST and cross-day validity not yet accepted",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
             "real_e2e_evidence": "one authorized account/store/breakfast combo; generalized purchase paths need acceptance",
@@ -70,7 +71,7 @@ def build_server(service):
                 "checkout_runtime": "not supplied by SMS login"},
             "steps": ["User logs into the official App with their own phone number.",
                       "Export only the authorized official balance exchange to a private local HAR or sample file.",
-                      "Run ezmcd account connect --har locally; same-session v5 evidence is additionally required for checkout.",
+                      "Run ezmcd account connect --har locally; maintain official v5 evidence with account runtime, including explicit same-device-context read-only verification where applicable.",
                       "Use account_check; set spending limits locally only when checkout is wanted."],
             "documentation": "docs/onboarding.md", "phone_label_is_not_authentication": True,
             "local_guide": credentials_guide()}
@@ -170,7 +171,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def product_detail(request: CheckoutInput, product_code: str, offer_id: str | None = None) -> dict:
-        """Read live combo rounds, component choices, extra prices and supported standard configurations. No cart/order mutation."""
+        """Read live combo rounds, components, prices, free keep/remove modifiers and specification variants. Follow a variant's live menu_offers to its detail; modifiers use codes, not arbitrary request blobs. No cart/order mutation."""
         _, provider = service.provider(request.account)
         return provider.product_detail(request, product_code, offer_id)
 

@@ -5,6 +5,7 @@ trusted. Advanced customization continues to use the configured official cart.
 """
 from .errors import EzMcdError
 from .models import yuan
+from .modifiers import public_modifiers, selected_modification, verify_modification
 
 
 def choose_offer(menu, product_code, offer_id=None):
@@ -46,10 +47,41 @@ def standard_customization(product):
 
 def configurable(product):
     try:
-        standard_customization(product)
+        cart_configuration(product)
         return True
     except EzMcdError:
         return False
+
+
+def cart_configuration(product, modifiers=None):
+    if modifiers is None:
+        try:
+            return {"customization": standard_customization(product)}
+        except EzMcdError:
+            pass
+    return selected_modification(product, modifiers)
+
+
+def verify_configured_cart(draft, cart):
+    """Verify the new modifier path after the one cart write; never retry it."""
+    for expected in draft.get("products", []):
+        checks = [expected] + [p for g in expected.get("comboItems", []) for p in g.get("comboProducts", [])]
+        if not any("modification" in p for p in checks):
+            continue
+        rows = [p for p in cart.get("items", []) if p["product_code"] == expected["code"]]
+        if len(rows) != 1 or rows[0]["quantity"] != expected["quantity"]:
+            raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart")
+        row = rows[0]
+        verify_modification(expected, row.get("configuration", {}))
+        for group in expected.get("comboItems", []):
+            actual_groups = [g for g in row["components"] if g.get("round") == group["round"]]
+            for part in group.get("comboProducts", []):
+                if "modification" not in part:
+                    continue
+                actual = [p for g in actual_groups for p in g.get("comboProducts", []) if p.get("code") == part["code"]]
+                if len(actual_groups) != 1 or len(actual) != 1 or actual[0].get("quantity") != part["quantity"]:
+                    raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart")
+                verify_modification(part, actual[0])
 
 
 def public_detail(detail, offer):
@@ -64,9 +96,17 @@ def public_detail(detail, offer):
                 "available": p.get("unsellable") is False,
                 "current_quantity": p.get("quantity", 0),
                 "extra_cny": yuan(p["diffPrice"]) if type(p.get("diffPrice")) is int and p["diffPrice"] >= 0 else None,
-                "standard_configuration_supported": configurable(p)} for p in group.get("comboProducts", [])]})
+                "standard_configuration_supported": configurable(p), "modifiers": public_modifiers(p)} for p in group.get("comboProducts", [])]})
     return {"product_code": product["code"], "name": product["name"], "product_type": product["type"],
         "offer_id": offer["offer_id"], "card_name": offer.get("cardName"), "groups": groups,
+        "modifiers": public_modifiers(product), "standard_configuration_supported": str(product.get("type")) in ("1", "7") and configurable(product),
+        "variants": [{"product_code": p.get("code"), "name": p.get("name"), "product_type": p.get("type"),
+            "specification_code": p.get("matchedSpecsCode"), "available": p.get("unsellable") is False,
+            "display_price_cny": yuan(p["price"]) if type(p.get("price")) is int and p["price"] >= 0 else None}
+            for p in product.get("products", [])] if str(product.get("type")) == "3" else [],
+        "specifications": [{"code": g.get("code"), "name": g.get("name"),
+            "choices": [{"code": p.get("code"), "name": p.get("name"), "price_note": p.get("spread")} for p in g.get("specs", [])]}
+            for g in product.get("specTypes", [])] if str(product.get("type")) == "3" else [],
         "max_quantity": detail.get("maxPurchaseQuantity"), "display_price_is_final_quote": False,
         "advanced_customization": "Configure in official App, then use cart_get and checkout_quote."}
 
@@ -100,8 +140,10 @@ def configured_product(selection, offer, detail, sequence):
     if kind == "1":
         if groups or selection.combo:
             raise EzMcdError("unexpected_combo_on_single_product")
-        result["customization"] = standard_customization(product)
+        result.update(cart_configuration(product, selection.modifiers))
         return result
+    if selection.modifiers is not None:
+        raise EzMcdError("select_modifiers_on_combo_components")
     if not groups or len({g["round"] for g in groups}) != len(groups):
         raise EzMcdError("unsupported_combo_group_schema")
     result["comboItems"] = []
@@ -121,7 +163,7 @@ def configured_product(selection, offer, detail, sequence):
             maximum = p.get("comboMaxQuantity", -1)
             if maximum != -1 and choice.quantity > maximum:
                 raise EzMcdError("component_quantity_exceeds_live_limit")
-            values.append({"code": p["code"], "name": p["name"], "quantity": choice.quantity,
-                           "customization": standard_customization(p)})
+            values.append({"code": p["code"], "name": p["name"], "quantity": choice.quantity}
+                          | cart_configuration(p, choice.modifiers))
         result["comboItems"].append({k: group[k] for k in ("round", "isChoices", "choicesCode")} | {"comboProducts": values})
     return result

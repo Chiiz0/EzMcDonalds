@@ -12,6 +12,24 @@ BALANCE = "/bff/member/mwallet/balance"
 ORDER = "/bff/order/orders"
 
 
+def runtime_sample_from_har(har):
+    samples = []
+    for entry in har.get("log", {}).get("entries", []):
+        request = entry.get("request", {})
+        url = urlsplit(request.get("url", ""))
+        if (url.scheme, url.netloc, url.path, url.query, url.fragment, request.get("method")) != (
+                "https", "api.mcd.cn", ORDER, "", "", "POST"):
+            continue
+        headers = {h["name"].lower(): h["value"] for h in request.get("headers", [])}
+        if headers.get("x-mcd-sign"):
+            samples.append({"request": {"method": "POST", "host": "api.mcd.cn", "path": ORDER,
+                                        "headers": headers, "body": ""}})
+    identities = {(s["request"]["headers"].get("sid"), s["request"]["headers"].get("token")) for s in samples}
+    if len(identities) != 1 or any(not sid or not token for sid, token in identities):
+        raise EzMcdError("har_requires_one_official_runtime_session")
+    return samples[-1]
+
+
 def samples_from_har(har):
     balances, runtimes = [], []
     for entry in har.get("log", {}).get("entries", []):

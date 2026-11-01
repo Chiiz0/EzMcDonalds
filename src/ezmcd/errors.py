@@ -21,6 +21,11 @@ def error_result(code):
         "select_account_for_meal_plan": ("早餐偏好尚未绑定账号。", "从 accounts_list 选择账号并传给 meal_plan，不会自动选择其他会员。"),
         "meal_preferences_missing_save_preferences_first": ("尚未保存点餐偏好。", "先选择门店、餐品、套餐组件、取餐时间和金额上限，再调用 preferences_save。"),
         "official_client_build_not_supported": ("当前官方客户端构建尚未适配。", "运行 doctor 检查环境，保留现有账号数据；需要适配对应构建。"),
+        "runtime_requires_same_verified_official_device": ("两个账号的官方设备或客户端上下文不一致。", "仅可复用同一官方设备的近期样本；其他设备请导入自己的同会话样本，不能修改设备字段强行匹配。"),
+        "runtime_sample_expired": ("官方运行样本已超过项目允许的时限，或时间不正确。", "导入新的本人官方样本；不要修改采样时间。"),
+        "runtime_readonly_verification_failed": ("该运行上下文没有通过当前账号的只读验证。", "原账号配置未修改。先用 account check 核对登录，再检查自己的官方运行样本，不自动重发或更换设备字段。"),
+        "cart_modifier_selection_not_confirmed_review_cart": ("服务器购物车没有确认所选配料。", "先调用 cart_get 核对；不要自动重新加购或继续付款，必要时在官方 App 修正。"),
+        "select_every_modifier_exactly_once": ("配料选择不完整或重复。", "重新读取 product_detail，对该商品所有支持的配料各给出一次 0（去除）或 1（保留）。"),
     }
     message, action = help_text.get(code, ("本次操作未完成。", "查看错误码与账号诊断；涉及订单的未知结果只查询，不重复提交。"))
     return {"ok": False, "error": code, "message": message, "next_action": action, "automatic_write_retry": False}

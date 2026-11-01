@@ -7,7 +7,7 @@ import sys
 
 from pydantic import ValidationError
 
-from .accounts import connect_har, connect_samples, import_session, revoke_local
+from .accounts import connect_har, connect_samples, import_session, revoke_local, update_runtime, update_runtime_from_device
 from .demo import setup_demo
 from .errors import EzMcdError, error_result
 from .models import CheckoutInput, Policy, cents, SHANGHAI
@@ -26,6 +26,12 @@ def main():
     check.add_argument("alias")
     refresh = account.add_parser("refresh", help="Refresh an existing session once, or resume its read-only verification")
     refresh.add_argument("alias")
+    runtime = account.add_parser("runtime", help="Update official runtime evidence without replacing login or purchase records")
+    runtime.add_argument("alias")
+    runtime_source = runtime.add_mutually_exclusive_group(required=True)
+    runtime_source.add_argument("--sample", help="Private same-session official v5 request JSON")
+    runtime_source.add_argument("--har", help="Private HAR with same-session official v5 evidence; no balance entry required")
+    runtime_source.add_argument("--device-from", help="Explicitly reuse recent evidence from the same official device; validates only a v5 GET, not an order")
     login = account.add_parser("login", help="Experimental direct SMS login; phone and code stay in the local terminal")
     login.add_argument("alias", nargs="?", default="personal")
     login.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
@@ -115,6 +121,9 @@ def main():
                 result = service.check_account(args.alias)
             elif args.action == "refresh":
                 result = service.refresh_account(args.alias)
+            elif args.action == "runtime":
+                result = (update_runtime_from_device(store, args.alias, args.device_from) if args.device_from
+                          else update_runtime(store, args.alias, args.har or args.sample, har=bool(args.har)))
             elif args.action == "login":
                 from .sms import interactive_login
                 result = interactive_login(store, args.alias, args.binary, args.device_from, args.resume)

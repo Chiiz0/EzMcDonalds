@@ -148,6 +148,8 @@ def plan_meal(service, account=None, date=None):
         offer = min(offers, key=lambda p: (cents(p["display_price_cny"]) if p.get("display_price_cny") else 0, p["offer_id"]))
         detail = provider.product_detail(request, offer["product_code"], offer["offer_id"])
         groups, extra, problems = choose_components(detail, preference.component_names)
+        if detail.get("standard_configuration_supported") is False:
+            problems.append({"reason": "product_default_configuration_unsupported"})
         if problems or type(detail.get("max_quantity")) is not int or preference.quantity > detail["max_quantity"]:
             issues.append({"reason": "product_configuration_required", "name": preference.name,
                            "details": problems, "max_quantity": detail.get("max_quantity")})

@@ -88,3 +88,7 @@
 下单回执丢失时`order_id`可能为空，保留`attempt_id`，通过官方订单列表人工核对，当前版本不自动猜测关联。`pickup_code=null`表示尚未生成。
 
 `simulation=true`始终表示离线演示，演示店号和取餐号不能实际使用。
+
+`product_detail` 会返回 `modifiers` 支持标记。免费二选配料可在 `cart_add_configured` 的对应商品/组件上逐项给出 `code` 与 `quantity`（0 或 1）；传入时不能漏项。加购回读未确认配料时停止，不能换 key 重试。规格聚合页的 `variants[].menu_offers` 用于继续查询具体商品，不能直接购买聚合页。详见[商品选择](products.md)。
+
+凭据维护仅在本机 CLI 进行：`account runtime` 可单独更新样本或显式检查同设备上下文复用。MCP 不接收运行样本、手机号或验证码，也不提供修改消费策略的工具。

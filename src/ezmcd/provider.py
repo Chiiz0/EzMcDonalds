@@ -5,7 +5,7 @@ import re
 from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items, menu_categories, membership_assets
 from .errors import EzMcdError
 from .discovery import cities, pickup_choices, resolve_city, store_results
-from .models import pickup_time, cents
+from .models import pickup_time, cents, yuan
 from .protocol.signing import device_update_metadata
 from .products import choose_offer, configured_product, public_detail
 from .transport import Transport, data
@@ -89,7 +89,13 @@ class McdProvider:
         daypart, params = self.context(args)
         menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
         offer = choose_offer(menu, product_code, offer_id)
-        return public_detail(self._detail(offer, daypart, params), offer)
+        result = public_detail(self._detail(offer, daypart, params), offer)
+        for variant in result["variants"]:
+            variant["menu_offers"] = [{"offer_id": p["offer_id"], "card_name": p.get("cardName"),
+                "display_price_cny": yuan(p["priceInfo"]["eatInPrice"]) if type(p.get("priceInfo", {}).get("eatInPrice")) is int else None}
+                for p in menu if p["productCode"] == variant["product_code"] and str(p.get("productType")) in ("1", "7")]
+            variant["next_step"] = "product_detail_with_variant_code_and_menu_offer" if variant["menu_offers"] else "variant_not_in_current_menu_use_official_app"
+        return result
 
     def configured_cart_draft(self, args, selections):
         if not 1 <= len(selections) <= 20:
@@ -126,7 +132,7 @@ class McdProvider:
         menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
         products = []
         for index, selection in enumerate(selections):
-            if selection.combo:
+            if selection.combo or selection.modifiers is not None:
                 raise EzMcdError("use_cart_add_configured_for_combo_choices")
             matches = {p["offer_id"]: p for p in menu if str(p.get("productCode")) == selection.product_code
                        and (selection.offer_id is None or p["offer_id"] == selection.offer_id)}

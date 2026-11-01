@@ -95,6 +95,7 @@ def component_spec(product):
 def cart_items(cart):
     return [{"product_code": str(p["code"]), "name": p["name"], "quantity": p["quantity"],
              "product_type": str(p["type"]), "components": component_spec(p),
+             "configuration": {k: deepcopy(p[k]) for k in ("customization", "modification", "grills", "biasChoices") if k in p},
              "amount_cents": p["realSubTotalPrice"]} for p in cart.get("products", [])]
 
 

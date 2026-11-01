@@ -82,7 +82,7 @@ class DemoProvider:
                 "product_type": 1, "groups": [], "max_quantity": 20, "display_price_is_final_quote": False}
 
     def configured_cart_draft(self, args, selections):
-        if any(s.combo for s in selections):
+        if any(s.combo or s.modifiers for s in selections):
             raise EzMcdError("demo_has_no_combo_choices")
         return self.simple_cart_draft(args, selections)
 

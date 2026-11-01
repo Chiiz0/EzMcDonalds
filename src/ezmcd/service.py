@@ -111,7 +111,11 @@ class Service:
             result = provider.write_cart(draft)
             self.store.receipt(op, "cart", result)
             data(result)
-            return provider.cart(args) | {"order_created": False}
+            cart = provider.cart(args)
+            if configured:
+                from .products import verify_configured_cart
+                verify_configured_cart(draft, cart)
+            return cart | {"order_created": False}
 
     def submit(self, alias, quote_id, request_key):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_key):

@@ -68,10 +68,17 @@ class Policy(BaseModel):
         return value
 
 
+class ModifierSelection(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    code: str = Field(pattern=r"^[0-9]{1,20}$")
+    quantity: int = Field(ge=0, le=1)
+
+
 class ComponentSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     product_code: str = Field(pattern=r"^[0-9]{1,20}$")
     quantity: int = Field(default=1, ge=1, le=20)
+    modifiers: list[ModifierSelection] | None = Field(default=None, max_length=20)
 
 
 class ComboSelection(BaseModel):
@@ -86,6 +93,7 @@ class ItemSelection(BaseModel):
     quantity: int = Field(default=1, ge=1, le=20)
     offer_id: str | None = None
     combo: list[ComboSelection] = Field(default_factory=list, max_length=20)
+    modifiers: list[ModifierSelection] | None = Field(default=None, max_length=20)
 
 
 class CheckoutInput(BaseModel):

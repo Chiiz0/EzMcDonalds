@@ -20,7 +20,8 @@ def credentials_guide():
             "运行 ezmcd account connect ALIAS --har /absolute/path/account.har；凭据不发到聊天。",
             "结束采样后恢复原代理，并移除临时证书和私钥。",
             "运行 ezmcd account check ALIAS；缺少下单运行字段时仍可找店、选餐、准备购物车与报价。",
-            "下单另需有效官方 v5 运行样本，当前不能从登录凭据独立生成；不要为获取样本额外创建订单。",
+            "下单运行字段可用 account runtime 单独更新；同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
+            "不要为获取运行样本额外创建订单；长期更新和复用模式的订单 POST 仍待验收。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],
         "account_label_is_not_authentication": True, "automatic_device_initialization": False}
 
