@@ -39,6 +39,7 @@ def build_server(service):
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
         "Use a stable idempotency key per user purchase. "
+        "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
         "After any ambiguous result query order_status; never create a replacement to retry payment. "
         "simulation=true means an offline demo, never a real order.")
 
@@ -63,6 +64,7 @@ def build_server(service):
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
             "real_e2e_evidence": "public core through stdio MCP: one SMS-authorized account, one store, breakfast-card combo, CNY12.60 McWallet payment; duplicate after restart returned the same paid order without new writes; other meal/store scenarios unverified",
             "payment_settlement": "successful consume followed by at most four read-only status checks, with 1/2/4 second delays; UNKNOWN is query-only, never a reason to repeat payment",
+            "order_recovery": "orders_list finds local attempts by account, pickup date and state; works offline after session expiry/revocation; order_status queries the original order live",
             "automatic_retries": False, "automatic_schedule": False}
 
     @server.tool(annotations=READ)
@@ -243,6 +245,13 @@ def build_server(service):
     def order_status(account: str, attempt_id: str) -> dict:
         """Reconcile the exact order, cashier and wallet. Never resubmits or consumes; cancellation overrides historical PAID."""
         return service.status(account, attempt_id)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+    @protected
+    def orders_list(account: str, pickup_date: str | None = None, state: str | None = None,
+                    limit: int = 20, offset: int = 0) -> dict:
+        """Recover LOCAL purchase attempts after lost context. No network or valid login needed. Optional YYYY-MM-DD pickup date (Asia/Shanghai) and exact state; limit 1..100, offset 0..10000. Newest pickup date then recorded order first. Includes unknown/cancelled attempts; missing order_id requires official review. Snapshots may be stale: query order_status for live confirmation. Does not include purchases made only in the official App."""
+        return service.orders(account, pickup_date=pickup_date, state=state, limit=limit, offset=offset)
 
     return server
 

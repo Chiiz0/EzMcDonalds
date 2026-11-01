@@ -87,6 +87,12 @@ def main():
     status = commands.add_parser("status")
     status.add_argument("account")
     status.add_argument("attempt_id")
+    history = commands.add_parser("orders", help="Find this account's local purchase records without a login or network call")
+    history.add_argument("account")
+    history.add_argument("--date", dest="pickup_date", help="Pickup date YYYY-MM-DD in Asia/Shanghai")
+    history.add_argument("--state", choices=("RESERVED", "CREATED", "PAYMENT_ATTEMPTED", "UNKNOWN", "PAID", "CANCELLED"))
+    history.add_argument("--limit", type=int, default=20)
+    history.add_argument("--offset", type=int, default=0)
     commands.add_parser("mcp-config")
     diagnose = commands.add_parser("doctor", help="Check local setup; optionally verify existing account sessions without purchases")
     diagnose.add_argument("--account")
@@ -202,6 +208,8 @@ def main():
                 pickup_at=args.pickup_at, max_amount_cny=args.max_amount))
         elif args.command == "checkout":
             result = service.submit(args.account, args.quote_id, args.idempotency_key)
+        elif args.command == "orders":
+            result = service.orders(args.account, pickup_date=args.pickup_date, state=args.state, limit=args.limit, offset=args.offset)
         else:
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))

@@ -1,5 +1,6 @@
 """Local credentials, atomic journal, identity-scoped locks and budgets."""
 from contextlib import contextmanager
+from datetime import date
 import fcntl
 import json
 import os
@@ -199,6 +200,38 @@ class Store:
         if not row:
             raise EzMcdError("attempt_not_found_for_account")
         return json.loads(row[0])
+
+    def list_attempts(self, identity, *, pickup_date=None, state=None, limit=20, offset=0):
+        """Read a bounded identity-scoped page, including unknown/unfinished writes.
+
+        A list is a journal snapshot, never an assertion about the live server.
+        Keep unknown attempts visible even when no order response was received.
+        """
+        if type(limit) is not int or not 1 <= limit <= 100 or type(offset) is not int or not 0 <= offset <= 10000:
+            raise EzMcdError("invalid_order_history_pagination")
+        if pickup_date is not None:
+            try:
+                if not isinstance(pickup_date, str) or date.fromisoformat(pickup_date).isoformat() != pickup_date:
+                    raise ValueError
+            except ValueError:
+                raise EzMcdError("invalid_order_history_date") from None
+        if state is not None and state not in ("RESERVED", "CREATED", "PAYMENT_ATTEMPTED", "UNKNOWN", "PAID", "CANCELLED"):
+            raise EzMcdError("invalid_order_history_state")
+        where, values = "identity=?", [identity]
+        if pickup_date is not None:
+            where += " AND day=?"
+            values.append(pickup_date)
+        if state is not None:
+            where += " AND state=?"
+            values.append(state)
+        with self.connect() as conn:
+            # Count and page share one read snapshot without taking a write lock.
+            conn.execute("BEGIN")
+            total = conn.execute("SELECT count(*) FROM attempts WHERE " + where, values).fetchone()[0]
+            rows = conn.execute("SELECT data FROM attempts WHERE " + where +
+                                " ORDER BY day DESC, rowid DESC LIMIT ? OFFSET ?", [*values, limit, offset]).fetchall()
+        return {"attempts": [json.loads(row[0]) for row in rows], "total": total,
+                "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
     def update_attempt(self, identity, data):
         with self.connect() as conn:

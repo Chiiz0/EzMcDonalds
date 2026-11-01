@@ -53,6 +53,7 @@
 | `checkout_submit` | 下单＋麦钱包付款＋核对 | **真实消费**，受策略限制 |
 | `order_pay` | 支付尚未开始付款的CREATED订单 | **真实消费**；已有尝试只查询 |
 | `order_status` | 订单、付款、余额、取餐码 | 只读 |
+| `orders_list` | 按账号、取餐日期、状态分页找回本地购买记录 | 本地只读，无网络；不是实时或完整官方订单列表 |
 
 [工具行为注解](https://py.sdk.modelcontextprotocol.io/servers/tools/)用于提示客户端，不代替本机策略和持久化去重。
 
@@ -91,6 +92,10 @@
 消费接口成功后，最多核对四次同一订单，中间等待1、2、4秒；一旦成功、取消或查询失败即停止等待。等待只查询订单、收银台和余额，不重发订单、预支付或消费。结果给出 `next_action`：`query_order_status` 继续查原订单；`query_pickup_code_later` 表示付款已核验但取餐码待生成；`review_in_official_app` 用于缺少订单回执、无法关联的情况。手动 `order_status` 每次只核对一次。
 
 下单回执丢失时`order_id`可能为空，保留`attempt_id`，通过官方订单列表人工核对，当前版本不自动猜测关联。`pickup_code=null`表示尚未生成。
+
+聊天或进程重启后可用 `orders_list(account, pickup_date?, state?, limit=20, offset=0)` 找回原尝试。日期为北京时间 `YYYY-MM-DD`，状态为大写原始状态，limit 范围1至100，offset 范围0至10000。列表按取餐日期降序、同日按记录顺序倒序；包含未知及取消记录。`source=local_project_journal`、`live_status_checked=false` 表示所有状态、取餐码和余额都是历史记录，下一步必须查询原订单的 `order_status`。`status_checked_at` 是最后成功核对的 Unix 秒时间，旧记录可为空。
+
+本地列表不包含仅在官方 App 创建的订单，返回空列表不构成重新购买的依据。找回记录不需要有效登录；实时查询仍需要同一会员的有效会话。[订单找回与取餐](orders.md)。
 
 `simulation=true`始终表示离线演示，演示店号和取餐号不能实际使用。
 

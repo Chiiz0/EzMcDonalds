@@ -29,6 +29,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("cart_add_configured", names)
                 self.assertIn("account_refresh", names)
                 self.assertIn("account_runtime_check", names)
+                history = next(t for t in tools if t.name == "orders_list")
+                self.assertTrue(history.annotations.read_only_hint)
+                self.assertFalse(history.annotations.open_world_hint)
                 self.assertTrue({"coupons_list", "coupon_products"}.issubset(names))
                 self.assertTrue(next(t for t in tools if t.name == "account_runtime_check").annotations.read_only_hint)
                 self.assertTrue({"cities_list", "stores_search", "membership_assets", "preferences_get", "preferences_save", "meal_plan"}.issubset(names))
@@ -81,6 +84,21 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(first["paid_verified"])
                 self.assertEqual(first["order_id"], second["order_id"])
                 self.assertEqual(second["wallet_balance_cny"], "90.00")
+            # A new MCP process can recover the attempt without its previous
+            # conversation, quote ID, idempotency key or payment permission.
+            from ezmcd.models import Policy
+            Service(store).set_policy("demo", Policy())
+            async with Client(params) as client:
+                found = json.loads((await client.call_tool("orders_list", {
+                    "account": "demo", "pickup_date": pickup.date().isoformat()})).content[0].text)
+                self.assertEqual(found["total"], 1)
+                self.assertFalse(found["live_status_checked"])
+                recovered = json.loads((await client.call_tool("order_status", {
+                    "account": "demo", "attempt_id": found["orders"][0]["attempt_id"]})).content[0].text)
+                self.assertTrue(recovered["paid_verified"])
+                self.assertEqual(recovered["order_id"], first["order_id"])
+            with store.connect() as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM writes").fetchone()[0], 4)  # one cart + three checkout stages
 
     async def test_account_errors_do_not_expose_secrets_or_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
