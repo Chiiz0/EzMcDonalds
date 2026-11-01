@@ -31,7 +31,8 @@
 | `accounts_list` | 别名、脱敏标签、策略 | 无 |
 | `account_diagnose` | 本地环境、账号状态及后续步骤 | 可选只读余额检查 |
 | `preferences_get` | 读取偏好 | 本地只读 |
-| `preferences_save` | 保存门店、餐品和取餐偏好 | 本地写入；不授权消费、不创建调度 |
+| `preferences_save` | 保存门店、餐品、配料和取餐偏好 | 本地写入；不授权消费、不创建调度 |
+| `account_runtime_check` | 检查现有 v5 运行字段，包括历史样本 | 固定一次 GET；不续期、不授权下单 |
 | `meal_plan` | 按实时菜单、时段与偏好准备草案 | 只读，不加购或购买 |
 | `membership_assets` | 权益卡有效期、券分类数量 | 只读 |
 | `cities_list` | 城市名称及代码 | 只读 |

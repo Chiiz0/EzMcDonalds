@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a5`：本地 Python CLI + 24 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、套餐偏好、实时选餐方案、消费策略和防重复日志。
+**当前版本 `0.1.0a6`：本地 Python CLI + 25 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；下单运行字段尚不能自动更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
@@ -85,6 +85,8 @@ chmod 600 /absolute/path/account.har
 4. 常用餐品可通过 `preferences_save` 保存，再用 `meal_plan` 生成草案。`checkout_quote` 核对商品、优惠和最终金额，报价有效期 120 秒；余额不足仍展示报价和付款缺口。
 5. 本地策略已授权时，`checkout_submit` 创建并支付一单；同一购买使用稳定的 `idempotency_key`。
 6. `order_status` 查询订单与取餐号。未知结果只查询，不换 key 重下。
+
+`account_runtime_check` 可单独检查现有运行字段是否通过一次 v5 只读查询，包括历史样本；它不会延长样本期限或授权下单。凭据指引提供请求断点采样方法和本机 `--paste-headers` 入口，不需要把凭据交给 Agent。
 
 [MCP 工具及调用示例](docs/mcp.md) · [套餐配置](docs/products.md) · [架构](docs/architecture.md)
 

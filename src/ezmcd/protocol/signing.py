@@ -5,6 +5,7 @@ from email.utils import format_datetime
 from functools import lru_cache
 import hashlib
 import hmac
+import math
 from pathlib import Path
 import secrets
 import struct
@@ -56,13 +57,21 @@ class Signer:
     def __init__(self, account):
         self.account = account
 
-    def runtime(self):
+    def runtime(self, *, readonly_probe=False):
         runtime = self.account.get("runtime")
-        if not runtime or not 0 <= time.time() - runtime["observed_at"] <= 24 * 3600:
+        observed = runtime.get("observed_at") if isinstance(runtime, dict) else None
+        now = time.time()
+        if (type(observed) not in (int, float) or not math.isfinite(observed)
+                or now < observed or (not readonly_probe and now - observed > 24 * 3600)):
             raise EzMcdError("runtime_expired_reconnect_official_session")
         return ObservedRuntime(runtime["device_hex"], runtime["environment_hex"])
 
-    def headers(self, method, path, body=b"", query="", business=None, v5=False):
+    def headers(self, method, path, body=b"", query="", business=None, v5=False, historical_runtime_probe=False):
+        # Older observations may be investigated only on this fixed read. This
+        # does not make them usable by order signing or change their timestamp.
+        if historical_runtime_probe and (method != "GET" or path != "/bff/order/orders" or body != b""
+                or query != "orderCategoryId=0&page=1&size=1" or not v5 or business != ("1001", "202")):
+            raise EzMcdError("historical_runtime_probe_is_readonly")
         profile = self.account["profile"]
         fields = profile["fields"]
         now = time.time()
@@ -80,7 +89,7 @@ class Signer:
             headers["apiVersion"] = "2.0"
         ak, secret, digest, _ = constants(self.account["binary"])
         if v5:
-            headers["x-mcd-sign"] = encode(path, self.runtime(), milliseconds=int(now * 1000),
+            headers["x-mcd-sign"] = encode(path, self.runtime(readonly_probe=historical_runtime_probe), milliseconds=int(now * 1000),
                 random_value=1 + secrets.randbelow(4095), counter=1, constants=digest)
         else:
             headers["x-mcd-gw-v"] = "1"

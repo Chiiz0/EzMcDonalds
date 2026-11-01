@@ -69,6 +69,17 @@ class ProductTests(unittest.TestCase):
             {"code": "111", "name": "酱", "key": "0-1", "checked": 1, "price": 0,
              "quantity": 1, "checkedCode": "1", "displayText": ""}], "items": []})
 
+    def test_empty_optional_round_respects_live_minimum_and_cannot_skip_required_round(self):
+        offer, detail, selection = fixture()
+        value = selection.model_dump()
+        value["combo"][1]["items"] = []
+        selection = ItemSelection.model_validate(value)
+        with self.assertRaisesRegex(EzMcdError, "quantity_outside_live_limits"):
+            configured_product(selection, offer, detail, 1)
+        detail["product"]["comboItems"][1]["minQuantity"] = 0
+        result = configured_product(selection, offer, detail, 1)
+        self.assertEqual(result["comboItems"][1]["comboProducts"], [])
+
     def test_draft_does_not_touch_nonempty_cart_or_send_writes(self):
         provider = McdProvider({}, transport=Mock())
         when = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)

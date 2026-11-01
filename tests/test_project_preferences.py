@@ -133,6 +133,85 @@ class PreferenceTests(unittest.TestCase):
             with self.assertRaises(ValidationError):
                 MealPreferences.model_validate(self.preferences.model_dump() | {field: True})
 
+    def ingredient_preferences(self):
+        choice = self.detail["groups"][0]["choices"][0]
+        choice["modifiers"] = {"supported": True, "groups": [{"min_quantity": 0, "max_quantity": 2,
+            "choices": [{"code": "300001", "name": "糖", "default_quantity": 1},
+                        {"code": "300002", "name": "奶", "default_quantity": 1}]}]}
+        value = self.preferences.model_dump()
+        value["items"][0]["component_modifiers"] = [{"component_name": "咖啡", "modifiers": [{"name": "糖", "quantity": 0}]}]
+        self.preferences = MealPreferences.model_validate(value)
+        save_preferences(self.store, self.preferences)
+        return choice["modifiers"]
+
+    def test_ingredient_preferences_resolve_live_codes_and_keep_other_defaults_without_writes(self):
+        public = self.ingredient_preferences()
+        first = plan_meal(self.service, "test")
+        self.assertTrue(first["selection_ready"])
+        self.assertEqual(first["items"][0]["combo"][0]["items"][0]["modifiers"], [
+            {"code": "300001", "quantity": 0}, {"code": "300002", "quantity": 1}])
+        # A new live product revision maps the same named preference afresh.
+        public["groups"][0]["choices"][0]["code"] = "400001"
+        second = plan_meal(self.service, "test")
+        self.assertTrue(second["selection_ready"])
+        self.assertEqual(second["items"][0]["combo"][0]["items"][0]["modifiers"][0]["code"], "400001")
+        self.assertEqual(first["idempotency_key"], second["idempotency_key"])
+        self.assertFalse(second["cart_changed"])
+        self.assertEqual(second["products"][0]["component_modifiers"][0]["modifiers"], [{"name": "糖", "quantity": 0}])
+
+    def test_missing_ambiguous_unsupported_and_invalid_ingredient_preferences_block_plan(self):
+        self.ingredient_preferences()
+        original = deepcopy(self.detail)
+        for case in ("missing", "ambiguous", "unsupported", "minimum", "component"):
+            self.detail.clear(); self.detail.update(deepcopy(original))
+            public = self.detail["groups"][0]["choices"][0]["modifiers"]
+            if case == "missing": public["groups"][0]["choices"][0]["name"] = "另一种糖"
+            if case == "ambiguous": public["groups"][0]["choices"][1]["name"] = "糖"
+            if case == "unsupported": public["supported"] = False
+            if case == "minimum": public["groups"][0]["min_quantity"] = 2
+            if case == "component": self.detail["groups"][0]["choices"][0]["name"] = "豆浆"
+            with self.subTest(case=case):
+                result = plan_meal(self.service, "test")
+                self.assertFalse(result["selection_ready"])
+                self.assertEqual(result["items"], [])
+
+    def test_ingredient_defaults_are_not_falsely_applied_to_combo_root(self):
+        self.ingredient_preferences()
+        value = self.preferences.model_dump()
+        value["items"][0]["modifiers"] = [{"name": "糖", "quantity": 0}]
+        save_preferences(self.store, MealPreferences.model_validate(value))
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.assertIn("use_component_modifiers", json.dumps(result))
+
+    def test_single_item_ingredient_preference_and_no_accidental_component_selection(self):
+        public = self.ingredient_preferences()
+        self.offer["product_type"] = 1
+        self.detail.update(groups=[], modifiers=public)
+        value = self.preferences.model_dump()
+        value["items"] = [{"name": "示例组合", "modifiers": [{"name": "糖", "quantity": 0}]}]
+        save_preferences(self.store, MealPreferences.model_validate(value))
+        result = plan_meal(self.service, "test")
+        self.assertTrue(result["selection_ready"])
+        self.assertEqual(result["items"][0]["modifiers"][0]["quantity"], 0)
+        value["items"][0]["component_modifiers"] = [{"component_name": "咖啡", "modifiers": [{"name": "糖", "quantity": 0}]}]
+        save_preferences(self.store, MealPreferences.model_validate(value))
+        self.assertFalse(plan_meal(self.service, "test")["selection_ready"])
+
+    def test_duplicate_ingredient_preference_is_rejected_before_saving(self):
+        value = self.preferences.model_dump()
+        value["items"][0]["modifiers"] = [{"name": "糖", "quantity": 0}, {"name": "糖", "quantity": 1}]
+        with self.assertRaises(ValidationError): MealPreferences.model_validate(value)
+
+    def test_optional_round_can_remain_explicitly_empty(self):
+        optional = deepcopy(self.detail["groups"][0])
+        optional.update(round=2, min_quantity=0)
+        optional["choices"][0]["name"] = "加配"
+        self.detail["groups"].append(optional)
+        result = plan_meal(self.service, "test")
+        self.assertTrue(result["selection_ready"])
+        self.assertEqual(result["items"][0]["combo"][1], {"round": 2, "items": []})
+
 
 if __name__ == "__main__":
     unittest.main()

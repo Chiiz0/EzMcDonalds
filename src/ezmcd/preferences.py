@@ -11,11 +11,51 @@ from .storage import read_private, write_private
 PREFERENCE_LOCK = fingerprint({"scope": "meal-preferences"})
 
 
+class PreferredModifier(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    name: str = Field(min_length=1, max_length=120)
+    quantity: int = Field(ge=0, le=1)
+
+    @field_validator("name")
+    @classmethod
+    def nonempty(cls, value):
+        if not value.strip():
+            raise ValueError("Choose an ingredient name from product_detail")
+        return value
+
+
+class PreferredComponentModifiers(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    component_name: str = Field(min_length=1, max_length=120)
+    modifiers: list[PreferredModifier] = Field(min_length=1, max_length=20)
+
+    @field_validator("modifiers")
+    @classmethod
+    def distinct_modifiers(cls, values):
+        if len({v.name for v in values}) != len(values):
+            raise ValueError("Choose each ingredient only once")
+        return values
+
+
 class PreferredItem(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=120)
     quantity: int = Field(default=1, ge=1, le=20)
     component_names: list[str] = Field(default_factory=list, max_length=20)
+    modifiers: list[PreferredModifier] = Field(default_factory=list, max_length=20)
+    component_modifiers: list[PreferredComponentModifiers] = Field(default_factory=list, max_length=20)
+
+    @field_validator("modifiers")
+    @classmethod
+    def distinct_modifiers(cls, values):
+        return PreferredComponentModifiers.distinct_modifiers(values)
+
+    @field_validator("component_modifiers")
+    @classmethod
+    def distinct_targets(cls, values):
+        if len({v.component_name for v in values}) != len(values) or any(not v.component_name.strip() for v in values):
+            raise ValueError("Choose distinct, nonempty component names")
+        return values
 
     @field_validator("component_names")
     @classmethod
@@ -100,6 +140,52 @@ def choose_components(detail, names):
     return groups, extra, issues
 
 
+def resolve_modifiers(public, preferences):
+    """Resolve exact ingredient names against fresh choices, filling other defaults.
+
+    Saved codes can change between restaurants and product revisions. A missing
+    or ambiguous requested name blocks the plan instead of dropping that choice.
+    """
+    if not preferences:
+        return None, []
+    if not public or not public.get("supported"):
+        return None, [{"reason": "preferred_ingredient_configuration_unsupported"}]
+    groups = public["groups"]
+    choices = [c for g in groups for c in g["choices"]]
+    quantities = {c["code"]: c["default_quantity"] for c in choices}
+    issues = []
+    for preference in preferences:
+        matches = [c for c in choices if c["name"] == preference.name]
+        if len(matches) != 1:
+            issues.append({"reason": "preferred_ingredient_missing_or_ambiguous", "name": preference.name})
+        else:
+            quantities[matches[0]["code"]] = preference.quantity
+    if any(not g["min_quantity"] <= sum(quantities[c["code"]] for c in g["choices"]) <= g["max_quantity"] for g in groups):
+        issues.append({"reason": "preferred_ingredients_outside_live_limits"})
+    return ([{"code": c["code"], "quantity": quantities[c["code"]]} for c in choices] if not issues else None), issues
+
+
+def apply_preferred_modifiers(detail, preference, groups):
+    problems = []
+    if groups and preference.modifiers:
+        modifiers = None
+        problems.append({"reason": "use_component_modifiers_for_combo_ingredients"})
+    else:
+        modifiers, problems = resolve_modifiers(detail.get("modifiers"), preference.modifiers)
+    chosen = [(selection, choice) for group in groups for selection in group["items"]
+              for source in detail["groups"] if source["round"] == group["round"]
+              for choice in source["choices"] if choice["product_code"] == selection["product_code"]]
+    for target in preference.component_modifiers:
+        matches = [(selection, choice) for selection, choice in chosen if choice["name"] == target.component_name]
+        if len(matches) != 1:
+            problems.append({"reason": "preferred_ingredient_component_not_selected_or_ambiguous", "name": target.component_name})
+            continue
+        selection, choice = matches[0]
+        selection["modifiers"], issues = resolve_modifiers(choice.get("modifiers"), target.modifiers)
+        problems.extend(issue | {"component": target.component_name} for issue in issues)
+    return modifiers, problems
+
+
 def plan_meal(service, account=None, date=None):
     saved = get_preferences(service.store)["preferences"]
     if not saved:
@@ -148,6 +234,8 @@ def plan_meal(service, account=None, date=None):
         offer = min(offers, key=lambda p: (cents(p["display_price_cny"]) if p.get("display_price_cny") else 0, p["offer_id"]))
         detail = provider.product_detail(request, offer["product_code"], offer["offer_id"])
         groups, extra, problems = choose_components(detail, preference.component_names)
+        modifiers, modifier_problems = apply_preferred_modifiers(detail, preference, groups)
+        problems.extend(modifier_problems)
         if detail.get("standard_configuration_supported") is False:
             problems.append({"reason": "product_default_configuration_unsupported"})
         if problems or type(detail.get("max_quantity")) is not int or preference.quantity > detail["max_quantity"]:
@@ -155,10 +243,12 @@ def plan_meal(service, account=None, date=None):
                            "details": problems, "max_quantity": detail.get("max_quantity")})
             continue
         selection = ItemSelection(product_code=offer["product_code"], offer_id=offer["offer_id"],
-                                  quantity=preference.quantity, combo=groups)
+                                  quantity=preference.quantity, combo=groups, modifiers=modifiers)
         selections.append(selection.model_dump())
         descriptions.append({"name": offer["name"], "card_name": offer.get("card_name"),
-                             "quantity": preference.quantity, "components": preference.component_names})
+                             "quantity": preference.quantity, "components": preference.component_names,
+                             "modifiers": [m.model_dump() for m in preference.modifiers],
+                             "component_modifiers": [m.model_dump() for m in preference.component_modifiers]})
         if estimate is not None:
             estimate = estimate + (cents(offer["display_price_cny"]) + extra) * preference.quantity if offer.get("display_price_cny") is not None and extra is not None else None
     if estimate is not None and estimate > cents(preferences.max_amount_cny):

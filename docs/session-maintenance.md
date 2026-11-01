@@ -34,3 +34,13 @@ ezmcd account refresh personal
 `checkout_prerequisites_met` 仅说明本地前置条件满足。下单仍必须检查实时门店、时段、购物车、报价、预算与已有订单。
 
 当前适配器把 v5 运行样本与会话绑定。刷新若更换 `sid`，旧样本失效；即使未更换也保留原始采样时间，不延长其寿命。**会话维护已可用，不代表下单设备运行字段已经可以长期自动更新。** 字段来源见[设备上下文](device-context.md)。
+
+## 检查现有运行字段
+
+```sh
+ezmcd account runtime-check personal
+```
+
+个人 Agent 可调用 `account_runtime_check(account)`。它对固定的订单列表第一页执行一次 v5 GET，结果只返回检查状态，不返回订单内容、签名或设备值。可以检查超过项目 24 小时限制的历史样本，用于区分本地期限与服务器当前是否接受这一次查询。
+
+检查不修改账号文件、采样时间、消费策略或购买日志。`read_only_v5_verified=true` 只证明这次 GET 成功；`order_post_acceptance_verified` 和 `checkout_authorized_by_check` 均为 `false`。即使历史样本通过，也仍须更新官方运行证据才能使用当前下单适配器。401 不足以单独判断是登录还是运行字段有问题，可先用 `account check` 核对会话。

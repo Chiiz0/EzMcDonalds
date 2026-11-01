@@ -24,6 +24,8 @@ def main():
     account.add_parser("guide", help="Show the local credentials setup guide without asking for secrets")
     check = account.add_parser("check")
     check.add_argument("alias")
+    runtime_check = account.add_parser("runtime-check", help="Check v5 runtime with one read-only request, including historical evidence; never renews it")
+    runtime_check.add_argument("alias")
     refresh = account.add_parser("refresh", help="Refresh an existing session once, or resume its read-only verification")
     refresh.add_argument("alias")
     runtime = account.add_parser("runtime", help="Update official runtime evidence without replacing login or purchase records")
@@ -32,6 +34,7 @@ def main():
     runtime_source.add_argument("--sample", help="Private same-session official v5 request JSON")
     runtime_source.add_argument("--har", help="Private HAR with same-session official v5 evidence; no balance entry required")
     runtime_source.add_argument("--device-from", help="Explicitly reuse recent evidence from the same official device; validates only a v5 GET, not an order")
+    runtime_source.add_argument("--paste-headers", action="store_true", help="Paste sid, token and x-mcd-sign privately from your official request; never sends an order")
     login = account.add_parser("login", help="Experimental direct SMS login; phone and code stay in the local terminal")
     login.add_argument("alias", nargs="?", default="personal")
     login.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
@@ -119,11 +122,18 @@ def main():
                 result = credentials_guide()
             elif args.action == "check":
                 result = service.check_account(args.alias)
+            elif args.action == "runtime-check":
+                from .runtime_check import check_runtime
+                result = check_runtime(store, args.alias)
             elif args.action == "refresh":
                 result = service.refresh_account(args.alias)
             elif args.action == "runtime":
-                result = (update_runtime_from_device(store, args.alias, args.device_from) if args.device_from
-                          else update_runtime(store, args.alias, args.har or args.sample, har=bool(args.har)))
+                if args.paste_headers:
+                    from .accounts import interactive_runtime
+                    result = interactive_runtime(store, args.alias)
+                else:
+                    result = (update_runtime_from_device(store, args.alias, args.device_from) if args.device_from
+                              else update_runtime(store, args.alias, args.har or args.sample, har=bool(args.har)))
             elif args.action == "login":
                 from .sms import interactive_login
                 result = interactive_login(store, args.alias, args.binary, args.device_from, args.resume)

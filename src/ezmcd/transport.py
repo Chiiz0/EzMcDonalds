@@ -40,11 +40,12 @@ class Transport:
     def __init__(self, account):
         self.signer = Signer(account)
 
-    def verify_runtime(self):
+    def verify_runtime(self, *, historical=False):
         """Narrow v5 validation using only this account's first order-list page."""
         path = "/bff/order/orders"
         query = "orderCategoryId=0&page=1&size=1"
-        headers = self.signer.headers("GET", path, query=query, business=("1001", "202"), v5=True)
+        headers = self.signer.headers("GET", path, query=query, business=("1001", "202"), v5=True,
+                                      historical_runtime_probe=historical)
         return self._open("GET", API + path + "?" + query, headers, None)
 
     def send(self, method, path, params=None, body=None):

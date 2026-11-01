@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from ezmcd.accounts import update_runtime, update_runtime_from_device, connect_samples
+from ezmcd.accounts import update_runtime, update_runtime_from_device, connect_samples, interactive_runtime
 from ezmcd.capture import runtime_sample_from_har
 from ezmcd.errors import EzMcdError
 from ezmcd.models import Policy, fingerprint
@@ -200,6 +200,33 @@ class RuntimeUpdateTests(unittest.TestCase):
             transport.verify_runtime()
         request.assert_called_once_with("GET", "https://api.mcd.cn/bff/order/orders?orderCategoryId=0&page=1&size=1", {"test": "synthetic"}, None)
         self.assertTrue(transport.signer.headers.call_args.kwargs["v5"])
+
+    def test_private_header_input_verifies_without_raw_sample_or_order_body(self):
+        e = evidence()["request"]["headers"]
+        with patch("sys.stdin.isatty", return_value=True), patch("getpass.getpass", side_effect=list(e.values())):
+            result = interactive_runtime(self.store, "mine")
+        self.assertTrue(result["runtime_updated"])
+        self.assertFalse(result["order_created"])
+        self.assertEqual(self.store.account("mine")["profile"], self.record["profile"])
+        self.assertEqual(self.store.account("mine")["runtime"]["observed_at"], NOW-10)
+        self.assertEqual(len(list(self.store.root.rglob('*.json'))), 1)
+        self.assertNotIn(e["X-Mcd-Sign"], json.dumps(result))
+
+    def test_header_input_rejects_noninteractive_fallback_and_wrong_account_without_saving(self):
+        import getpass
+        with patch("sys.stdin.isatty", return_value=False), patch("getpass.getpass") as prompt:
+            with self.assertRaisesRegex(EzMcdError, "private_terminal"):
+                interactive_runtime(self.store, "mine")
+            prompt.assert_not_called()
+        with patch("sys.stdin.isatty", return_value=True), patch("getpass.getpass", side_effect=getpass.GetPassWarning):
+            with self.assertRaisesRegex(EzMcdError, "private_terminal"):
+                interactive_runtime(self.store, "mine")
+        values = list(evidence()["request"]["headers"].values()); values[0] = "another-session"
+        with patch("sys.stdin.isatty", return_value=True), patch("getpass.getpass", side_effect=values):
+            with self.assertRaisesRegex(EzMcdError, "account_mismatch"):
+                interactive_runtime(self.store, "mine")
+        self.wallet.assert_not_called()
+        self.assertEqual(self.store.account("mine"), self.record)
 
 
 if __name__ == "__main__":

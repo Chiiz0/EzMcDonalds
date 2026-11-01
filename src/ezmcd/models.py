@@ -84,7 +84,9 @@ class ComponentSelection(BaseModel):
 class ComboSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     round: int = Field(ge=0, le=100)
-    items: list[ComponentSelection] = Field(min_length=1, max_length=20)
+    # An optional round still appears explicitly, with no choices. Live detail
+    # decides whether zero is allowed; a required round cannot be skipped.
+    items: list[ComponentSelection] = Field(max_length=20)
 
 
 class ItemSelection(BaseModel):

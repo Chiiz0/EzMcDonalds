@@ -86,6 +86,10 @@ def update_runtime(store, alias, sample_path, *, har=False):
     if har:
         from .capture import runtime_sample_from_har
         sample = runtime_sample_from_har(sample)
+    return _update_runtime_evidence(store, alias, sample)
+
+
+def _update_runtime_evidence(store, alias, sample):
     def update(record):
         if record.get("revoked") or record["provider"] != "mcd-cn":
             raise EzMcdError("active_official_account_required_for_runtime_update")
@@ -102,6 +106,35 @@ def update_runtime(store, alias, sample_path, *, har=False):
     updated = store.modify_account(alias, update)
     return public_account(updated, session_verified=True) | {"runtime_updated": True,
         "observation_time_preserved": True, "order_created": False, "payment_attempted": False}
+
+
+def interactive_runtime(store, alias):
+    """Paste only three request headers locally, without saving a raw sample.
+
+    The official request may have been aborted at a request-side breakpoint.
+    Its reconstructed signature is evidence; we never send its order body.
+    """
+    import getpass
+    import sys
+    import warnings
+    if not sys.stdin.isatty():
+        raise EzMcdError("runtime_headers_require_private_terminal")
+    store.account(alias)  # Catch a wrong alias before asking for credentials.
+    headers = {}
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            for name in ("sid", "token", "x-mcd-sign"):
+                value = getpass.getpass(f"官方请求 {name}（仅值，不回显）：").strip()
+                if not value or len(value) > 4096 or any(ord(c) < 32 for c in value):
+                    raise EzMcdError("runtime_header_value_invalid")
+                headers[name] = value
+        return _update_runtime_evidence(store, alias, {"request": {"method": "POST", "host": "api.mcd.cn",
+            "path": "/bff/order/orders", "headers": headers, "body": ""}})
+    except getpass.GetPassWarning:
+        raise EzMcdError("runtime_headers_require_private_terminal") from None
+    finally:
+        headers.clear()
 
 
 def update_runtime_from_device(store, alias, source_alias):

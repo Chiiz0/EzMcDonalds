@@ -50,11 +50,12 @@ def build_server(service):
             "sms_login_via_mcp": False, "session_auto_refresh": False,
             "session_refresh": "explicit account_refresh; local 24h rotation interval, no ambiguous POST retries",
             "stores": "city/name search or explicit coordinates, favorites, live pickup slots; compatible locker pickup required",
-            "meal_preferences": "local saved choices and read-only live meal_plan; no purchase authorization or scheduling",
+            "meal_preferences": "local saved products, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
             "membership_assets": "card validity and coupon category counts; actual eligibility from live menu and quote",
             "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
             "combo_configuration": "explicit choices for each round; supported free binary modifiers can be kept/removed; unknown or paid modifications use the official cart",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; reused-context order POST and cross-day validity not yet accepted",
+            "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
             "real_e2e_evidence": "one authorized account/store/breakfast combo; generalized purchase paths need acceptance",
@@ -85,8 +86,15 @@ def build_server(service):
 
     @server.tool(annotations=READ)
     @protected
+    def account_runtime_check(account: str) -> dict:
+        """Check this account's observed v5 runtime with one fixed order-list GET. Can inspect historical evidence, but does not renew it, change account files, authorize checkout, or prove order POST acceptance."""
+        from .runtime_check import check_runtime
+        return check_runtime(service.store, account)
+
+    @server.tool(annotations=READ)
+    @protected
     def preferences_get() -> dict:
-        """Read locally saved store, meal, component, pickup-time and budget preferences. These do not authorize spending or enable a schedule."""
+        """Read locally saved store, meal, component, ingredient, pickup-time and budget preferences. These do not authorize spending or enable a schedule."""
         return get_preferences(service.store)
 
     @server.tool(annotations=LOCAL)
