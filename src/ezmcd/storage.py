@@ -378,6 +378,17 @@ class Store:
         return {"attempts": [json.loads(row[0]) for row in rows], "total": total,
                 "offset": offset, "limit": limit, "has_more": offset + len(rows) < total}
 
+    def attempts_at_pickup(self, identity, store_code, pickup_at):
+        """Find the same scope reserve() protects, regardless of meal/key/state.
+
+        A truncated history page could hide an earlier reserved/unknown meal.
+        """
+        with self.connect() as conn:
+            rows = conn.execute("SELECT data FROM attempts WHERE identity=? AND day=? ORDER BY rowid DESC",
+                                (identity, pickup_at[:10])).fetchall()
+        return [attempt for row in rows if (attempt := json.loads(row[0]))["store_code"] == store_code
+                and attempt["pickup_at"] == pickup_at]
+
     def update_attempt(self, identity, data):
         with self.connect() as conn:
             result = conn.execute("UPDATE attempts SET state=?,data=? WHERE id=? AND identity=?",

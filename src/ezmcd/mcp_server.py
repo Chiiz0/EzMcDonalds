@@ -37,7 +37,7 @@ def build_server(service):
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
         "After a login/session change, runtime_recovery_available allows account_runtime_restore to verify this member's saved recent device evidence without new sampling; it never extends observation age or spending permission. "
-        "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
+        "meal_plan first recovers a local purchase at the same account/store/pickup time; existing_purchase=true means review existing_orders and query the original status, not add a new cart or generate a replacement key. It works offline for that recovery and does not refresh official status. Otherwise it only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
         "With a nonempty cart, pickup_methods reports the initial confirmation's fulfillment options. Locker-in and take-in-store are implemented. "
         "If the requested method is not selected, use checkout_quote_pickup with a fresh cart_ref and stable key; its READY result is the quote to review and submit. "
         "The selection belongs to that quote: a new initial GET may still show a default. Recover lost preparation replies with checkout_quote_pickup_status; never resend an unresolved switch under a new key. "
@@ -63,6 +63,7 @@ def build_server(service):
             "pickup_methods": "read initial confirmation methods for a nonempty cart; report selected/available/supported separately; never change fulfillment or infer locker support from store tags",
             "pickup_quote": "explicit one-shot method switch, persisted response and 120-second selected quote; submit rechecks unchanged cart/prices using GETs without repeating the switch; no fallback to default fulfillment",
             "meal_preferences": "local saved products, named parent variants, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
+            "meal_recovery": "meal_plan checks local purchases before login/network and again after live slot selection; any existing state at the same account/store/time returns the original attempt instead of a new draft, even after revocation; not the official account's full history or a live payment check",
             "membership_assets": "card validity and coupon category counts; coupons_list queries current store/time availability and coupon_products lists matching products",
             "products": "ordinary items and combos; variants follow their own live menu offers or an explicit validated regular-parent detail selection; variant_of preserves the source, parent card/coupon offers are never transferred",
             "variant_evidence": "large hot milk absent from menu passed real parent-detail selection, single add, CNY23.00 quote, CNY20.00 limit rejection, restart replay and clear; no payment or automatic selection of related promotions",
@@ -137,7 +138,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def meal_plan(account: str | None = None, date: str | None = None) -> dict:
-        """Resolve saved products, named coupons and ingredient preferences against live pickup slots and choices. Returns a draft, not an order. Never silently substitutes unavailable coupons, items or times; date is YYYY-MM-DD in Shanghai."""
+        """Recover an existing local purchase for the preferred account/store/time before querying live slots or drafting a meal. existing_purchase=true returns original attempts without a new cart draft, even after session expiry; query their status separately. Otherwise resolve saved items/coupons/ingredients without substitution. date is YYYY-MM-DD in Shanghai; an explicit past date can recover its purchase."""
         return plan_meal(service, account, date)
 
     @server.tool(annotations=READ)

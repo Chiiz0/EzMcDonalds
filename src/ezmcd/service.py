@@ -48,24 +48,32 @@ class Service:
         # Deliberately do not construct a provider or make a live account check.
         account = self.store.account(alias)
         page = self.store.list_attempts(account["identity"], pickup_date=pickup_date, state=state, limit=limit, offset=offset)
-        orders = []
-        for attempt in page.pop("attempts"):
-            row = attempt_summary(attempt) | {"store_name": None, "items": None, "discount_names": None,
-                                               "meal_details_available": False,
-                "next_action": "query_order_status" if attempt.get("order_id") else "review_in_official_app"}
-            try:
-                quote = self.store.quote(account["identity"], attempt["quote_id"])
-            except EzMcdError as error:
-                if error.code != "quote_not_found_for_account":
-                    raise
-            else:
-                row.update({k: quote[k] for k in ("store_name", "items", "discount_names")})
-                row["meal_details_available"] = True
-            orders.append(row)
+        orders = [self._local_order(account["identity"], a) for a in page.pop("attempts")]
         return {"account": alias, "orders": orders, **page, "pickup_timezone": "Asia/Shanghai",
                 "sort": "pickup_date_desc_then_recorded_order_desc", "source": "local_project_journal",
                 "live_status_checked": False, "includes_official_app_orders": False,
                 "next_step": "use_order_status_for_live_confirmation", "order_created": False, "payment_attempted": False}
+
+    def _local_order(self, identity, attempt):
+        row = attempt_summary(attempt) | {"store_name": None, "items": None, "discount_names": None,
+            "meal_details_available": False,
+            "next_action": "query_order_status" if attempt.get("order_id") else "review_in_official_app"}
+        try:
+            quote = self.store.quote(identity, attempt["quote_id"])
+        except EzMcdError as error:
+            if error.code != "quote_not_found_for_account":
+                raise
+        else:
+            row.update({k: quote[k] for k in ("store_name", "items", "discount_names")})
+            row["meal_details_available"] = True
+        return row
+
+    def orders_at_pickup(self, alias, store_code, pickup_at):
+        # Local snapshot, including revoked/expired accounts. A plan cannot
+        # replace the locked duplicate checks at actual submission time.
+        account = self.store.account(alias)
+        return [self._local_order(account["identity"], a) for a in
+                self.store.attempts_at_pickup(account["identity"], store_code, pickup_at)]
 
     def provider(self, alias):
         account = self.store.account(alias)

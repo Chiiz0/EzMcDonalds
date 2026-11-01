@@ -1,5 +1,5 @@
 """User-owned meal preferences and a read-only plan from live restaurant data."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -229,7 +229,40 @@ def plan_meal(service, account=None, date=None):
                 raise ValueError
         except ValueError:
             raise EzMcdError("meal_plan_date_requires_yyyy_mm_dd") from None
-    record, provider = service.provider(alias)
+    record = service.store.account(alias)
+    result = {"account": alias, "store_code": preferences.store_code, "simulation": record["provider"] == "demo",
+              "cart_changed": False, "order_created": False, "payment_attempted": False,
+              "selection_ready": False, "quote_required": True, "scheduling_enabled": False,
+              "existing_purchase": False, "existing_orders": []}
+
+    def existing_meal(pickup_at):
+        orders = service.orders_at_pickup(alias, preferences.store_code, pickup_at)
+        if not orders:
+            return None
+        return result | {"pickup_at": pickup_at, "items": [], "products": [], "quote_required": False,
+            "existing_purchase": True, "existing_orders": orders, "live_status_checked": False,
+            "source": "local_project_journal", "includes_official_app_orders": False,
+            "issues": [{"reason": "existing_purchase_for_preferred_pickup"}],
+            "next_step": "review_existing_purchase", "automatic_write_retry": False}
+
+    # Recover the intended meal before any session/reservation request. An
+    # explicit past date can find its purchase. Without a date, consider only
+    # the next future preferred weekday/time, not a previous breakfast.
+    now = datetime.now(SHANGHAI)
+    if date is not None:
+        candidate = datetime.fromisoformat(date + "T" + preferences.pickup_time + ":00+08:00")
+    else:
+        candidate = None
+        for offset in range(8):
+            day = now.date() + timedelta(days=offset)
+            when = datetime.fromisoformat(day.isoformat() + "T" + preferences.pickup_time + ":00+08:00")
+            if when > now and when.weekday() in preferences.weekdays:
+                candidate = when
+                break
+    if candidate is not None and (existing := existing_meal(candidate.isoformat())):
+        return existing
+
+    _, provider = service.provider(alias)
     slots = provider.pickup_slots(preferences.store_code)
     possible = []
     for day in slots["dates"]:
@@ -240,13 +273,13 @@ def plan_meal(service, account=None, date=None):
                 when = datetime.fromisoformat(value).astimezone(SHANGHAI)
                 if when.strftime("%H:%M") == preferences.pickup_time and when.weekday() in preferences.weekdays:
                     possible.append(value)
-    result = {"account": alias, "store_code": preferences.store_code, "simulation": record["provider"] == "demo",
-              "cart_changed": False, "order_created": False, "payment_attempted": False,
-              "selection_ready": False, "quote_required": True, "scheduling_enabled": False}
     if not possible:
         return result | {"issues": [{"reason": "preferred_pickup_time_unavailable", "available_slots": slots}]}
     request = CheckoutInput(account=alias, store_code=preferences.store_code, pickup_at=min(possible),
                             max_amount_cny=preferences.max_amount_cny, eat_type=preferences.eat_type)
+    # Live availability may choose a later day than the first preferred date.
+    if existing := existing_meal(request.pickup_at):
+        return existing
     menu = None
     selections, descriptions, issues, estimate = [], [], [], 0
     for preference in preferences.items:

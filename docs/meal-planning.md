@@ -8,9 +8,19 @@
 2. `pickup_slots` 返回北京时间的具体可预约时间，已过去的时间会过滤；门店营业不代表任意时刻都能自取。
 3. `menu_list` 返回菜单分类、图片、展示价格和卡优惠；也可用 `coupons_list → coupon_products` 选择当时可用的单品券。`product_detail` 返回套餐各轮可选组件和配料。
 4. `preferences_save` 保存用户选定的名称和条件；账号可以暂不绑定，之后 `meal_plan` 显式传入账号。
-5. `meal_plan` 从当前可预约时段中选择符合偏好的下一次时间，并重新读取菜单、优惠和套餐详情，输出 `CheckoutInput` 与 `ItemSelection` 草案。
+5. `meal_plan` 先检查目标账号、门店、取餐时间是否已有本地购买记录。有则交回原尝试；没有才从当前可预约时段中选择符合偏好的下一次时间，再检查该时间的购买记录，然后读取菜单、优惠和详情，输出 `CheckoutInput` 与 `ItemSelection` 草案。
 
 `meal_plan` 不加购、不下单、不付款。指定 `date` 时只检查这一天，不会悄悄改到其他日期；不指定时在官方当前开放的预约范围内查找。星期以北京时间计算，0 表示周一、6 表示周日。
+
+## 同一餐已经下过单
+
+`existing_purchase=true` 表示该账号、门店、取餐时间已有本地购买记录。此时 `selection_ready=false`、`quote_required=false`、`items=[]`，`existing_orders` 提供原尝试、原餐品、金额和下一步。Agent 应核对原记录，按其中的 `attempt_id` 调用 `order_status`；没有订单号的未知尝试须在官方入口核对，不能换 key 再买。
+
+该检查发生在联网之前，因此账号退出、会话过期或刷新未完成时仍能找回。明确传入过去日期也可恢复该餐，即使偏好的星期已经改变。不传日期则先检查下一次未来的偏好星期和时间，不会用昨天的早餐替代下一餐；门店实际可预约日期仍以实时接口为准。
+
+已经付款、尚未付款、结果不明和已取消均保留原记录。更换餐品、预算或柜台/取餐柜偏好不会把相同门店和时间变成新订单；返回的金额及餐品属于原记录，不会用新偏好覆盖。
+
+这是本地日志快照，`live_status_checked=false`；不代表刚验证过付款，也不包含只在官方 App 中创建的订单。后续查询仍需要有效会话。返回没有记录也不替代提交前的实时订单检查、账号锁和防重复约束。
 
 ## 匹配规则
 
@@ -53,7 +63,7 @@
 
 ## Agent 执行顺序
 
-`meal_plan → cart_get → cart_add_configured（购物车为空时）→ checkout_quote → checkout_submit → order_status`。
+先调用 `meal_plan`。若返回 `existing_purchase=true`，按 `existing_orders` 核对原尝试，不再加购或提交。否则继续 `cart_get → cart_add_configured（购物车为空时）→ checkout_quote → checkout_submit → order_status`。
 
 使用方案提供的稳定 `idempotency_key`，同一次购买不要反复生成新 key。已有购物车先核对，不覆盖。`selection_ready=true` 只说明选餐草案完整，不代表已经授权消费或具备下单运行字段。
 
