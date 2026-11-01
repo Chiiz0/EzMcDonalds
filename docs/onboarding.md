@@ -7,7 +7,11 @@
 - 官方 macOS App（iOS App on Mac），已验证版本 7.0.440 / build 202610201841。
 - 二进制默认 `/Applications/McdApp.app/WrappedBundle/McdApp`；CLI 可用 `--binary` 指定。
 - SHA-256 必须匹配 `745da50c09c44a62eb222f72fda2571b9fa3acec55a2a17a4e5fdee5b7a85d85`。签名材料在用户机器上从该文件读取，仓库不分发官方二进制或提取值。其他构建会停止，需要独立适配。
-- 本地采样文件须为普通文件、权限 0600、大小不超过 4 MiB；只保留必要请求后再导出。
+- 本地 HAR/JSON 采样文件须为普通文件、权限 0600、大小不超过 4 MiB；复制请求文本上限128 KiB。只保留必要请求后再导出。
+
+## 从复制的单条请求接入
+
+可以在本人本地调试工具中复制余额请求为 POSIX cURL 或原始 HTTP 请求，Mac 用户运行 `ezmcd account connect personal --clipboard`，或使用权限0600文本文件的 `--request-file`。不必整理 HAR 或响应正文；项目验证请求签名并重新查询余额，成功才保存账号。复制的命令不会执行。完整操作及运行字段更新见[复制请求导入](request-import.md)。
 
 ## 从 HAR 接入
 

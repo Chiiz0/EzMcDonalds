@@ -58,6 +58,7 @@ def build_server(service):
             "coupon_configuration": "fresh references scoped to account/store/time; ordinary single-product coupons can be drafted and their cart echo must match; new coupon writes/payments not yet accepted",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; reused-context order POST and cross-day validity not yet accepted",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
+            "local_request_import": "CLI only: copy one signed balance request as cURL/raw HTTP, then connect --clipboard on Mac or --request-file; validates signature and live balance, never executes copied commands; runtime supports the same text sources and discards the order body",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
             "real_e2e_evidence": "one authorized account/store/breakfast combo; generalized purchase paths need acceptance",
@@ -73,8 +74,8 @@ def build_server(service):
                 "input": "phone and SMS code in local terminal only, never chat or MCP",
                 "checkout_runtime": "not supplied by SMS login"},
             "steps": ["User logs into the official App with their own phone number.",
-                      "Export only the authorized official balance exchange to a private local HAR or sample file.",
-                      "Run ezmcd account connect --har locally; maintain official v5 evidence with account runtime, including explicit same-device-context read-only verification where applicable.",
+                      "Copy only your own signed balance request as cURL/raw HTTP for local import, or export the authorized exchange to a private HAR/sample file.",
+                      "Run ezmcd account connect ALIAS --clipboard on Mac, --request-file for a private copied request, or --har locally; never send copied requests through MCP/chat. Maintain official v5 evidence with account runtime, including explicit same-device-context read-only verification where applicable.",
                       "Use account_check; set spending limits locally only when checkout is wanted."],
             "documentation": "docs/onboarding.md", "phone_label_is_not_authentication": True,
             "local_guide": credentials_guide()}

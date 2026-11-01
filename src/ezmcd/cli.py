@@ -35,6 +35,8 @@ def main():
     runtime_source.add_argument("--har", help="Private HAR with same-session official v5 evidence; no balance entry required")
     runtime_source.add_argument("--device-from", help="Explicitly reuse recent evidence from the same official device; validates only a v5 GET, not an order")
     runtime_source.add_argument("--paste-headers", action="store_true", help="Paste sid, token and x-mcd-sign privately from your official request; never sends an order")
+    runtime_source.add_argument("--clipboard", action="store_true", help="Read one copied cURL/raw request from macOS clipboard; never executes it")
+    runtime_source.add_argument("--request-file", help="Private text file containing one copied cURL/raw request")
     login = account.add_parser("login", help="Experimental direct SMS login; phone and code stay in the local terminal")
     login.add_argument("alias", nargs="?", default="personal")
     login.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
@@ -52,6 +54,8 @@ def main():
     source = capture.add_mutually_exclusive_group(required=True)
     source.add_argument("--balance-sample")
     source.add_argument("--har", help="Private HAR export containing this official session's balance exchange")
+    source.add_argument("--clipboard", action="store_true", help="Read one copied balance request from macOS clipboard; never executes it")
+    source.add_argument("--request-file", help="Private text file containing one copied balance cURL/raw request")
     capture.add_argument("--runtime-sample")
     capture.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
     capture.add_argument("--phone-label")
@@ -128,7 +132,17 @@ def main():
             elif args.action == "refresh":
                 result = service.refresh_account(args.alias)
             elif args.action == "runtime":
-                if args.paste_headers:
+                if args.clipboard or args.request_file:
+                    from .request_import import read_request_file, read_request_clipboard
+                    from .accounts import update_runtime_request_text
+                    text = read_request_clipboard() if args.clipboard else read_request_file(args.request_file)
+                    try:
+                        result = update_runtime_request_text(store, args.alias, text)
+                    finally:
+                        text = None
+                    if args.clipboard:
+                        result["clipboard_clear_reminder"] = "请在本机清理复制的请求及剪贴板历史；项目没有修改剪贴板。"
+                elif args.paste_headers:
                     from .accounts import interactive_runtime
                     result = interactive_runtime(store, args.alias)
                 else:
@@ -141,7 +155,19 @@ def main():
                 result = import_session(store, args.alias, args.profile, args.binary, args.runtime_sample,
                                         args.phone_label, update=args.update)
             elif args.action == "connect":
-                if args.har:
+                if args.clipboard or args.request_file:
+                    if args.runtime_sample:
+                        raise EzMcdError("import_runtime_separately_after_request_connection")
+                    from .request_import import read_request_file, read_request_clipboard
+                    from .accounts import connect_request_text
+                    text = read_request_clipboard() if args.clipboard else read_request_file(args.request_file)
+                    try:
+                        result = connect_request_text(store, args.alias, text, args.binary, args.phone_label, update=args.update)
+                    finally:
+                        text = None
+                    if args.clipboard:
+                        result["clipboard_clear_reminder"] = "请在本机清理复制的请求及剪贴板历史；项目没有修改剪贴板。"
+                elif args.har:
                     if args.runtime_sample:
                         raise EzMcdError("har_runtime_sample_is_selected_from_same_archive")
                     result = connect_har(store, args.alias, args.har, args.binary, args.phone_label, update=args.update)

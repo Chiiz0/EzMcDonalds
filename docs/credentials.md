@@ -44,6 +44,8 @@ ezmcd account check personal
 
 导入器会验证官方域名、余额请求签名、单一会话及当前余额。它不重放 HAR 中的订单，也不保存其他流量。成功后原始 HAR 不再是日常查询所必需的，可按自己的保留策略移除；不要删除项目订单日志。
 
+也可以跳过 HAR 导出：在第3步复制单次余额请求为 cURL/原始 HTTP 请求，在 Mac 私有终端运行 `ezmcd account connect personal --clipboard`。它只解析请求并重新查询余额，不执行复制的命令。非剪贴板方式为 `--request-file`，详见[复制请求导入](request-import.md)。随后同样恢复代理、移除临时证书并清理剪贴板中的凭据。
+
 若工具只能导出单请求 JSON，可使用 `--balance-sample`；格式见[单请求接入](onboarding.md#从单请求样本或已有-profile-接入)。
 
 ## 为什么已登录还可能不能下单
@@ -66,9 +68,11 @@ ezmcd account check personal
 ezmcd account runtime personal --sample /absolute/path/runtime.json
 # 或仅包含当前会话官方 v5 请求的 HAR，无需再放入余额请求
 ezmcd account runtime personal --har /absolute/path/runtime.har
+# Mac 上复制单次已授权或已阻断的官方请求后，也可使用
+ezmcd account runtime personal --clipboard
 ```
 
-该操作验证样本、只读核验当前余额，再原子保存运行字段；不重放请求正文，保留原采样时间、刷新令牌、消费策略和订单日志。混合会话、过期或早于现有记录的样本会被拒绝。
+该操作验证样本、只读核验当前余额，再原子保存运行字段；不重放请求正文，保留原采样时间、刷新令牌、消费策略和订单日志。混合会话、过期或早于现有记录的样本会被拒绝。复制文本的格式与清理方法见[请求导入](request-import.md)。
 
 ### 在发送订单前的断点取得请求头
 

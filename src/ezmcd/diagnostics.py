@@ -16,11 +16,12 @@ def credentials_guide():
         "steps": [
             "运行 ezmcd doctor，检查官方客户端构建与已有账号。",
             "已有本人设备上下文：运行 ezmcd account login NEW_ALIAS --device-from EXISTING_ALIAS，在终端输入手机号和验证码。",
-            "首次导入：在官方 App 登录，用本人本地调试工具导出麦钱包余额请求及成功响应为私有 HAR。",
-            "运行 ezmcd account connect ALIAS --har /absolute/path/account.har；凭据不发到聊天。",
+            "首次导入：在官方 App 登录，用本人本地调试工具复制麦钱包余额请求为 cURL 或原始 HTTP 请求。Mac 用户在私有终端运行 ezmcd account connect ALIAS --clipboard；项目只解析，不执行复制的命令。",
+            "也可使用 account connect ALIAS --request-file 私有文本文件；原有 --har 入口保留。凭据不发到聊天，完成后清理复制内容及剪贴板历史。",
             "结束采样后恢复原代理，并移除临时证书和私钥。",
             "运行 ezmcd account check ALIAS；缺少下单运行字段时仍可找店、选餐、准备购物车与报价。",
-            "下单运行字段可用 account runtime 单独更新；同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
+            "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
+            "同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
             "不要为获取运行样本额外创建订单；长期更新和复用模式的订单 POST 仍待验收。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],
         "account_label_is_not_authentication": True, "automatic_device_initialization": False}

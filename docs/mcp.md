@@ -96,4 +96,4 @@
 
 `coupons_list → coupon_products → product_detail` 使用同一 `request`，详情与选择带上返回的 `coupon_ref`。加购前重新核验，券失效时不回退原价；加购后必须回读确认券。详见[优惠券选择](coupons.md)。
 
-凭据维护仅在本机 CLI 进行：`account runtime` 可单独更新样本或显式检查同设备上下文复用。MCP 不接收运行样本、手机号或验证码，也不提供修改消费策略的工具。
+凭据维护仅在本机 CLI 进行：`account connect` 和 `account runtime` 都支持复制的单次 cURL/原始请求文本，Mac 用 `--clipboard`，文件用 `--request-file`；只解析，不执行复制命令。`account runtime` 也可显式检查同设备上下文复用。MCP 不接收运行样本、手机号或验证码，不读取剪贴板，也不提供修改消费策略的工具。[本机导入指引](request-import.md)。

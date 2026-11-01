@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a7`：本地 Python CLI + 27 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
+**当前版本 `0.1.0a8`：本地 Python CLI + 27 个 stdio MCP 工具。** 原型已完成一笔真实的纯脚本早餐卡下单付款；项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐与配料偏好、实时选餐方案、消费策略和防重复日志。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；下单运行字段尚不能自动更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
@@ -36,7 +36,14 @@ python3 -m venv .venv
 
 ## 连接自己的账号
 
-先在官方 App 登录自己的手机号，再按[接入文档](docs/onboarding.md)准备本地采样。可导入 HAR 或单次余额请求样本；命令验证签名、查询当前余额，仅保存必要会话字段。手机号标签不是认证凭据。
+先在官方 App 登录自己的手机号，再按[接入文档](docs/onboarding.md)准备本地采样。Mac 用户可复制一条余额请求后运行下面命令，无需整理 HAR；也可保留原有文件导入方式。命令验证签名、查询当前余额，仅保存必要会话字段。手机号标签不是认证凭据。
+
+```sh
+# 在本机调试工具中复制余额请求为 cURL/原始 HTTP 请求后运行
+.venv/bin/ezmcd account connect personal --clipboard
+```
+
+复制的命令只作为文本解析，不执行、不发给 Agent；结束后清理剪贴板、恢复代理并移除临时证书。[复制请求导入与更新说明](docs/request-import.md)。文件方式如下：
 
 ```sh
 # HAR 文件只保留自己明确授权的会话，权限必须为 0600
@@ -86,7 +93,7 @@ chmod 600 /absolute/path/account.har
 5. 本地策略已授权时，`checkout_submit` 创建并支付一单；同一购买使用稳定的 `idempotency_key`。
 6. `order_status` 查询订单与取餐号。未知结果只查询，不换 key 重下。
 
-`account_runtime_check` 可单独检查现有运行字段是否通过一次 v5 只读查询，包括历史样本；它不会延长样本期限或授权下单。凭据指引提供请求断点采样方法和本机 `--paste-headers` 入口，不需要把凭据交给 Agent。
+`account_runtime_check` 可单独检查现有运行字段是否通过一次 v5 只读查询，包括历史样本；它不会延长样本期限或授权下单。凭据指引提供请求断点采样方法，运行字段支持 `--clipboard`、`--request-file` 及逐项 `--paste-headers` 导入；订单正文被丢弃，不需要把凭据交给 Agent。
 
 [MCP 工具及调用示例](docs/mcp.md) · [套餐配置](docs/products.md) · [架构](docs/architecture.md)
 

@@ -33,6 +33,20 @@ def error_result(code):
         "coupon_unavailable_for_selected_pickup": ("当前门店或取餐时间无法使用这张券，或次数已用完。", "重新查询券的适用状态和规则，由用户选择其他券或调整安排；不自动换券或原价购买。"),
         "coupon_configuration_or_quantity_requires_review": ("该券的商品配置或数量不在支持范围内。", "重新查询 coupon_products 与 product_detail；需要特殊兑换流程的券交回官方 App。"),
         "cart_coupon_not_confirmed_review_cart": ("服务器购物车没有确认所选优惠券。", "先调用 cart_get 核对；不要重新加购或继续付款，必要时在官方 App 修正。"),
+        "copied_request_empty_or_too_large": ("复制的请求为空或超过128 KiB。", "只复制目标单次请求，不能导入整个会话；也可使用私有 HAR 入口。"),
+        "copied_request_format_not_supported": ("请求文本格式无法识别。", "复制 POSIX cURL 或包含请求行与 Host 的原始 HTTP 请求；不要只复制 URL，也不要直接执行复制的命令。"),
+        "copied_request_headers_invalid_or_repeated": ("请求头格式不完整或存在重复字段。", "从本人官方请求重新复制一次，保留原始值；不要手工拼接不同请求的头。"),
+        "copied_request_official_origin_required": ("请求不是支持的官方 HTTPS 地址，或存在地址歧义。", "使用 api.mcd.cn 的目标请求；不接受其他主机、非默认端口、查询参数或覆盖 Host。"),
+        "copied_request_wrong_endpoint_or_method": ("复制的请求不符合当前操作。", "账号连接需要 GET /bff/member/mwallet/balance；运行字段更新需要 POST /bff/order/orders 的已有授权或发送前已阻断样本。"),
+        "copied_request_option_not_supported": ("复制文本包含未支持的命令选项或额外命令。", "改用单次原始 HTTP 请求或私有 HAR；项目不会执行命令、代理参数或文件操作。"),
+        "copied_request_file_reference_not_allowed": ("请求文本引用了其他文件。", "改用包含请求头的原始 HTTP 请求或私有 HAR；项目不会读取 cURL 引用的文件。"),
+        "copied_request_requires_one_request": ("文本包含多个地址、方法或正文。", "只复制一条本人官方请求，不合并多次采样。"),
+        "copied_request_unexpected_body_encoding": ("请求的正文编码不符合导入范围。", "余额 GET 不应有正文；可重新复制单次请求或使用私有 HAR。"),
+        "clipboard_import_requires_macos_use_request_file": ("剪贴板入口目前只支持 macOS。", "将单次请求保存为权限0600的文本文件，使用 --request-file；或使用原有 HAR 导入。"),
+        "clipboard_import_requires_private_terminal": ("剪贴板导入需要本机交互终端。", "由用户在自己的终端运行 --clipboard；不要把请求放进参数、聊天或 MCP 工具。"),
+        "clipboard_request_unreadable": ("无法读取本机剪贴板文本。", "重新复制单次请求，或改用权限0600的 --request-file；不要把凭据发到聊天。"),
+        "import_runtime_separately_after_request_connection": ("复制请求接入不能同时指定另一份运行样本。", "先完成余额请求接入，再用 account runtime 为同会话单独更新运行字段。"),
+        "account_exists_update_session_without_resetting_ledger": ("该账号或会员身份已连接。", "先运行 account list 核对原别名；更新同一会员时使用原别名及 --update，保留消费策略和购买日志。"),
     }
     message, action = help_text.get(code, ("本次操作未完成。", "查看错误码与账号诊断；涉及订单的未知结果只查询，不重复提交。"))
     return {"ok": False, "error": code, "message": message, "next_action": action, "automatic_write_retry": False}

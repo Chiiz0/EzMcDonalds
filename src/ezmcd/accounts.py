@@ -22,15 +22,20 @@ def import_session(store, alias, profile_path, binary, runtime_sample=None, phon
 
 def profile_from_balance_sample(sample, binary):
     """Validate a user-selected official request locally; never replay its signature."""
-    request = sample["request"]
-    if (request.get("method"), request.get("host"), request.get("path"), request.get("body", "")) != (
-            "GET", "api.mcd.cn", "/bff/member/mwallet/balance", ""):
-        raise EzMcdError("successful_balance_sample_required")
     response = sample["response"]
     payload = json.loads(response["body"]) if isinstance(response["body"], str) else response["body"]
     if response.get("status") != 200 or payload.get("success") is not True:
         raise EzMcdError("successful_balance_sample_required")
+    return profile_from_balance_request(sample["request"], binary)
+
+
+def profile_from_balance_request(request, binary):
+    if (request.get("method"), request.get("host"), request.get("path"), request.get("body", "")) != (
+            "GET", "api.mcd.cn", "/bff/member/mwallet/balance", ""):
+        raise EzMcdError("successful_balance_sample_required")
     headers = {k.lower(): v for k, v in request["headers"].items()}
+    if len(headers) != len(request["headers"]):
+        raise EzMcdError("official_session_headers_incomplete")
     if (headers.get("ct") != "101" or headers.get("sv") != "v4" or
             any(not isinstance(headers.get(k), str) or not headers[k] for k in ("sid", "token", "meddyid", "v", "language"))):
         raise EzMcdError("official_session_headers_incomplete")
@@ -44,7 +49,7 @@ def profile_from_balance_sample(sample, binary):
     mapping = {"sid": "sid", "token": "deviceToken", "meddyid": "meddyId",
                "routingid": "routingId", "tid": "tid", "d": "riskDeviceId"}
     return {"schema_version": 2, "imported_at": datetime.now(timezone.utc).isoformat(),
-        "source": "user-selected signed balance sample", "build_sha256": BUILD,
+        "source": "user-selected signed balance request", "build_sha256": BUILD,
         "verified_endpoint": request["path"], "fields": {v: headers[k] for k, v in mapping.items() if headers.get(k)},
         "client_headers": {k: headers[k] for k in ("ct", "v", "language")}}
 
@@ -59,6 +64,18 @@ def connect_har(store, alias, har_path, binary, phone_label=None, *, update=Fals
     balance, runtime = samples_from_har(read_private(Path(har_path).expanduser()))
     profile = profile_from_balance_sample(balance, binary)
     return _enroll(store, alias, profile, binary, runtime, phone_label, update=update, check_live=True)
+
+
+def connect_request_text(store, alias, text, binary, phone_label=None, *, update=False):
+    from .request_import import parse_request
+    request = parse_request(text, purpose="balance")
+    profile = profile_from_balance_request(request, binary)
+    return _enroll(store, alias, profile, binary, None, phone_label, update=update, check_live=True)
+
+
+def update_runtime_request_text(store, alias, text):
+    from .request_import import parse_request
+    return _update_runtime_evidence(store, alias, {"request": parse_request(text, purpose="runtime")})
 
 
 def runtime_from_sample(profile, sample, binary):
