@@ -43,6 +43,8 @@ def capture_outcome(audit):
 
 
 class RuntimeCapture:
+    balance_only = False
+
     def __init__(self, store, alias, *, service="Wi-Fi", seconds=120, mitmdump=None, refresh_from=None, report=None, manage_app=False):
         if (not isinstance(service, str) or not service.strip() or service.startswith("-")
                 or len(service) > 120 or any(ord(c) < 32 for c in service)
@@ -113,13 +115,17 @@ class RuntimeCapture:
         if audit["blocked_requests"] != 1 or audit["upstream_connections"] != 0:
             raise EzMcdError("sampling_guard_preflight_failed")
 
-    def run(self):
+    def executable_path(self):
         if platform.system() != "Darwin":
             raise EzMcdError("sampling_certificate_macos_required")
         sibling = Path(sys.executable).with_name("mitmdump")
         executable = self.executable or (str(sibling) if sibling.is_file() else shutil.which("mitmdump"))
         if not executable or not Path(executable).is_file() or not os.access(executable, os.X_OK):
             raise EzMcdError("sampling_mitmproxy_required")
+        return str(Path(executable).absolute())
+
+    def run(self):
+        executable = self.executable_path()
         account = self.store.account(self.alias)
         if account.get("revoked") or account["provider"] != "mcd-cn":
             raise EzMcdError("active_official_account_required_for_runtime_update")
@@ -132,12 +138,23 @@ class RuntimeCapture:
             if fingerprint({"provider": "mcd-cn", "member": fields["meddyId"]}) != account["identity"]:
                 raise EzMcdError("sampling_member_mismatch")
             try:
-                return self._run(account, ca, str(Path(executable).absolute()),
+                return self._run(account, ca, executable,
                     fingerprint({"sid": fields["sid"], "token": fields["deviceToken"]}))
             except subprocess.TimeoutExpired:
                 raise EzMcdError("sampling_system_command_failed") from None
             except http.client.HTTPException:
                 raise EzMcdError("sampling_guard_preflight_failed") from None
+
+    def configuration(self, account, deadline, refresh_session):
+        return {"output": str(self.directory), "binary": account["binary"],
+            "identity": account["identity"], "deadline": deadline, "refresh_session": refresh_session,
+            "schema_version": 2, "account_fingerprint": fingerprint(account)}
+
+    def completed(self, audit):
+        return audit["balance_saved"] if self.balance_only else audit["runtime_saved"]
+
+    def outcome(self, audit):
+        return capture_outcome(audit)
 
     def _run(self, account, ca, executable, refresh_session):
         before, effective_before = self.proxy_state(), self.effective_proxy()
@@ -160,9 +177,7 @@ class RuntimeCapture:
             raise EzMcdError("sampling_close_official_app_first")
         secure_directory(self.directory)
         deadline = time.time() + self.seconds
-        write_private(self.directory / "config.json", {"output": str(self.directory), "binary": account["binary"],
-            "identity": account["identity"], "deadline": deadline, "refresh_session": refresh_session,
-            "schema_version": 2, "account_fingerprint": fingerprint(account)})
+        write_private(self.directory / "config.json", self.configuration(account, deadline, refresh_session))
         write_private(self.directory / "proxy-before.json", {"service": self.service, "proxy": before})
         # mitmdump watches its script for changes. Pin a private loader for this
         # run so an editable install or package upgrade cannot unload the guard.
@@ -213,7 +228,8 @@ class RuntimeCapture:
                 raise EzMcdError("sampling_effective_proxy_mismatch")
             self.report({"stage": "GUARD_ACTIVE", "seconds": self.seconds,
                 "next": ("工具正在打开官方 App。" if self.app is not None else "现在启动官方 App。") +
-                        "先打开麦钱包余额，再操作已准备的购物车。订单会被本地阻断；见无订单采样指引。"})
+                        ("只进入麦钱包余额页，收到样本后立即收尾；不要操作购物车或登录。" if self.balance_only else
+                         "先打开麦钱包余额，再操作已准备的购物车。订单会被本地阻断；见无订单采样指引。")})
             if self.app is not None and not stop and time.time() <= deadline:
                 self.app.start()
             while not self.app_running() and not stop and time.time() <= deadline:
@@ -230,13 +246,13 @@ class RuntimeCapture:
                 state = read_private(self.directory / "audit.json")
                 if state["balance_saved"] and not balance_announced:
                     seconds_remaining = max(0, math.ceil(deadline - time.time()))
-                    active = bool(seconds_remaining and not stop and not state["runtime_saved"] and process.poll() is None)
+                    active = bool(not self.balance_only and seconds_remaining and not stop and not state["runtime_saved"] and process.poll() is None)
                     self.report({"stage": "BALANCE_CAPTURED", "seconds_remaining": seconds_remaining,
                         "capture_window_active": active,
                         "next": "本人余额样本已校验。可在当前保护窗口内进入确认页；提交请求会被阻断。" if active
                                 else "余额样本已校验，本轮正在收尾。不要继续提交；请退出官方 App。"})
                     balance_announced = True
-                if (stop or time.time() > deadline or state["runtime_saved"] or process.poll() is not None) and not warned:
+                if (stop or time.time() > deadline or self.completed(state) or process.poll() is not None) and not warned:
                     self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next":
                         ("工具正在请求退出麦当劳；失败时需手动处理。" if self.app is not None else "请退出麦当劳；若卡住，只强制退出麦当劳。") + "关闭后才恢复代理。"})
                     warned = True
@@ -290,7 +306,7 @@ class RuntimeCapture:
                 for sig, handler in old_signals.items():
                     signal.signal(sig, handler)
         audit = read_private(self.directory / "audit.json")
-        outcome = capture_outcome(audit)
+        outcome = self.outcome(audit)
         self.report({"stage": "CAPTURE_FINISHED", **outcome})
         return {"account": self.alias, "capture_directory": str(self.directory),
             "balance_saved": audit["balance_saved"], "runtime_saved": audit["runtime_saved"],

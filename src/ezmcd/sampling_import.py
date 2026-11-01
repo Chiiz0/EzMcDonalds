@@ -33,7 +33,7 @@ def verify_capture_runtime(record):
         raise EzMcdError("runtime_sample_expired")
 
 
-def _capture_files(store, directory):
+def _capture_files(store, directory, *, connection=False):
     directory = Path(directory).expanduser().absolute()
     parent = store.root / "captures"
     if (directory.parent != parent or not re.fullmatch(r"[0-9a-f]{32}", directory.name)
@@ -41,22 +41,35 @@ def _capture_files(store, directory):
             or directory.stat().st_mode & 0o077):
         raise EzMcdError("sampling_capture_directory_invalid")
     files = {name: read_private(directory / (name + ".json"))
-             for name in ("config", "audit", "cleanup", "balance", "runtime")}
+             for name in (("config", "audit", "cleanup", "balance") if connection else
+                          ("config", "audit", "cleanup", "balance", "runtime"))}
     if not all(isinstance(value, dict) for value in files.values()):
         raise EzMcdError("sampling_capture_incomplete")
     config, audit, cleanup = (files[k] for k in ("config", "audit", "cleanup"))
-    if (config.get("schema_version") != 2 or config.get("output") != str(directory)
-            or not isinstance(config.get("account_fingerprint"), str)
-            or not re.fullmatch(r"[0-9a-f]{64}", config["account_fingerprint"])):
+    if connection:
+        bound = (config.get("schema_version") == 3 and config.get("purpose") == "account_connect"
+                 and config.get("identity") is None and config.get("refresh_session") is None
+                 and isinstance(config.get("alias"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", config["alias"])
+                 and isinstance(config.get("binary"), str) and Path(config["binary"]).is_absolute())
+    else:
+        bound = (config.get("schema_version") == 2 and isinstance(config.get("account_fingerprint"), str)
+                 and re.fullmatch(r"[0-9a-f]{64}", config["account_fingerprint"]))
+    if not bound or config.get("output") != str(directory):
         raise EzMcdError("sampling_capture_binding_missing")
-    if (audit.get("balance_saved") is not True or audit.get("runtime_saved") is not True
-            or type(audit.get("blocked_requests")) is not int or audit["blocked_requests"] < 2):
+    if (audit.get("balance_saved") is not True or audit.get("runtime_saved") is not (not connection)
+            or type(audit.get("blocked_requests")) is not int or audit["blocked_requests"] < (1 if connection else 2)):
         raise EzMcdError("sampling_capture_incomplete")
     before, after = cleanup.get("proxy_before"), cleanup.get("proxy_after")
     if (cleanup.get("official_app_closed") is not True or cleanup.get("cleanup_errors") != []
+            or cleanup.get("app_launch_pending", False) is not False
             or not isinstance(before, dict) or before.get("Enabled") != "No" or before != after):
         raise EzMcdError("sampling_cleanup_needs_attention")
     session_path = directory / "session.json"
+    if connection:
+        if (audit.get("allowed_session_refreshes", 0) != 0 or audit.get("session_saved", False) is not False
+                or any((directory / name).exists() or (directory / name).is_symlink() for name in ("session.json", "runtime.json"))):
+            raise EzMcdError("sampling_connection_scope_invalid")
+        return directory, files
     if session_path.exists() or session_path.is_symlink():
         files["session"] = read_private(session_path)
     elif audit.get("session_saved") is True:

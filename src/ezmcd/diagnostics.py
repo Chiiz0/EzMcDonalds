@@ -16,6 +16,7 @@ def credentials_guide():
         "steps": [
             "运行 ezmcd doctor，检查官方客户端构建与已有账号。",
             "已有本人设备上下文：运行 ezmcd account login NEW_ALIAS --device-from EXISTING_ALIAS，在终端输入手机号和验证码。",
+            "首次接入也可尝试 sampling-connect ALIAS：先在支持的Mac官方App登录，在本机终端按步骤只进入麦钱包；全程阻断写请求，代理恢复后核验并保存，消费默认关闭且不含运行字段。需要本人受限采样证书；一个已有会员的新App采样、自动开关、代理恢复及首次导入已实测，用户仍需进入钱包。",
             "首次导入：在官方 App 登录，用本人本地调试工具复制麦钱包余额请求为 cURL 或原始 HTTP 请求。Mac 用户在私有终端运行 ezmcd account connect ALIAS --clipboard；项目只解析，不执行复制的命令。",
             "也可使用 account connect ALIAS --request-file 私有文本文件；原有 --har 入口保留。凭据不发到聊天，完成后清理复制内容及剪贴板历史。",
             "结束采样后恢复原代理；临时证书随即移除。需要重复采样的 Mac 用户可显式使用 sampling-cert 管理仅限 api.mcd.cn 的持久证书，不再需要时运行 sampling-cert remove。",

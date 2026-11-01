@@ -30,9 +30,17 @@ def main():
     sampling.add_argument("--update-account", action="store_true", help="After proxy cleanup, verify and atomically import this capture for the same member")
     sampling.add_argument("--interactive", action="store_true", help="Wait for Enter in a local terminal, then show live human-readable steps on stderr; final JSON stays on stdout")
     sampling.add_argument("--manage-app", action="store_true", help="Close the verified official App before capture, open it after guard checks and request exit before proxy restoration; no UI automation")
+    first_connection = commands.add_parser("sampling-connect", help="Interactive first connection from your logged-in Mac App wallet; blocks all mutations, restores proxy, then imports the account")
+    first_connection.add_argument("alias")
+    first_connection.add_argument("--binary", default="/Applications/McdApp.app/WrappedBundle/McdApp")
+    first_connection.add_argument("--network-service", default="Wi-Fi")
+    first_connection.add_argument("--seconds", type=int, default=120)
+    first_connection.add_argument("--mitmdump")
+    first_connection.add_argument("--manage-app", action="store_true")
     sampling_import = commands.add_parser("sampling-import", help="Resume a completed local capture import; only reads upstream, never starts a proxy")
     sampling_import.add_argument("alias")
     sampling_import.add_argument("capture_directory")
+    sampling_import.add_argument("--connect", action="store_true", help="Resume a first-connection balance capture; never replaces an existing account")
     account = commands.add_parser("account").add_subparsers(dest="action", required=True)
     account.add_parser("list")
     account.add_parser("guide", help="Show the local credentials setup guide without asking for secrets")
@@ -146,6 +154,24 @@ def main():
         if args.command == "sampling-cert":
             from .sampling_cert import SamplingCertificate
             result = getattr(SamplingCertificate(store), args.certificate_action)()
+        elif args.command == "sampling-connect":
+            from .sampling_connect import AccountCapture, import_connection, require_new_alias
+            from .sampling_console import SamplingConsole
+            require_new_alias(store, args.alias)
+            console = SamplingConsole(manage_app=args.manage_app, balance_only=True)
+            capture = AccountCapture(store, args.alias, binary=args.binary, service=args.network_service,
+                seconds=args.seconds, mitmdump=args.mitmdump, report=console, manage_app=args.manage_app)
+            console.ready(args.alias, args.seconds)
+            result = capture.run()
+            if result.get("sample_import_ready") is True:
+                try:
+                    result |= import_connection(store, args.alias, result["capture_directory"])
+                except (EzMcdError, OSError, ValueError, KeyError, TypeError) as error:
+                    result.update(ok=False, account_created=False, account_updated=False,
+                        import_error=error.code if isinstance(error, EzMcdError) else "invalid_local_configuration_or_response",
+                        resume_command=[sys.executable, "-m", "ezmcd.cli", "--data-dir", str(store.root),
+                            "sampling-import", args.alias, result["capture_directory"], "--connect"],
+                        next_action="采样已结束，但账号尚未接入。保留本目录，解决导入错误后可用 resume_command 只读重试；已有会员请使用原账号维护入口。")
         elif args.command == "sampling-capture":
             from .sampling import RuntimeCapture
             console = None
@@ -164,8 +190,12 @@ def main():
                 from .sampling_import import import_capture
                 result |= import_capture(store, args.alias, result["capture_directory"])
         elif args.command == "sampling-import":
-            from .sampling_import import import_capture
-            result = import_capture(store, args.alias, args.capture_directory)
+            if args.connect:
+                from .sampling_connect import import_connection
+                result = import_connection(store, args.alias, args.capture_directory)
+            else:
+                from .sampling_import import import_capture
+                result = import_capture(store, args.alias, args.capture_directory)
         elif args.command == "mcp-config":
             result = {"mcpServers": {"ezmcdonalds": {"command": sys.executable,
                 "args": ["-m", "ezmcd.mcp_server"], "env": {"EZMCD_DATA_DIR": str(store.root)}}}}
@@ -284,6 +314,8 @@ def main():
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         if args.command == "sampling-capture" and not (result.get("runtime_saved") and result.get("balance_saved")):
+            return 2
+        if args.command == "sampling-connect" and not (result.get("account_created") or result.get("already_imported")):
             return 2
         if args.command == "account" and args.action == "login" and result.get("state") != "CONNECTED":
             return 2

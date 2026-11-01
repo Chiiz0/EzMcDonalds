@@ -46,6 +46,9 @@ class RuntimeGuard:
         self.output = Path(config['output'])
         self.binary = config['binary']
         self.identity = config['identity']
+        self.balance_only = config.get('purpose') == 'account_connect'
+        if self.balance_only and (config.get('schema_version') != 3 or self.identity is not None or config.get('refresh_session') is not None):
+            raise ValueError('invalid_connection_capture_scope')
         self.deadline = config['deadline']
         self.clock = clock
         self.profile = None
@@ -132,7 +135,7 @@ class RuntimeGuard:
             key=req.method+' '+route
             self.audit['blocked_routes'][key]=self.audit['blocked_routes'].get(key,0)+1
         self.audit['last_result'] = 'expired_blocking' if not live else 'blocked'
-        if official and live and req.method == 'POST' and req.path == ORDER and not self.runtime_saved:
+        if official and live and req.method == 'POST' and req.path == ORDER and not self.runtime_saved and not self.balance_only:
             try:
                 if self.profile is None:
                     raise ValueError('balance_not_captured')
@@ -231,10 +234,13 @@ class RuntimeGuard:
                       'response':{'status':200,'body':{'success':True}}}
             profile = profile_from_balance_sample(sample,self.binary)
             identity = fingerprint({'provider':'mcd-cn','member':profile['fields']['meddyId']})
-            if identity != self.identity:
+            if not self.balance_only and identity != self.identity:
                 raise ValueError('wrong_member')
             write_private(self.output/'balance.json',sample)
             self.profile = profile
+            if self.balance_only:
+                self.identity = identity
+                self.audit['captured_identity'] = identity
             self.audit['balance_saved'] = True
             self.audit['last_result'] = 'balance_captured'
         except Exception as error:
