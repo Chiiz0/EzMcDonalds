@@ -194,7 +194,8 @@ def resolve_modifiers(public, preferences):
         for j, choice in enumerate(group["choices"]):
             quantity = quantities[i, j]
             if quantity and (not choice.get("available", True) or not choice.get("selection_supported", True)
-                    or cents(choice.get("extra_cny", "0.00")) != 0 and group.get("kind") != "optional_choice"):
+                    or cents(choice.get("extra_cny", "0.00")) != 0 and not (group.get("kind") == "optional_choice"
+                        or group.get("kind") == "single_choice" and choice.get("paid_selection_supported") is True)):
                 issues.append({"reason": "preferred_ingredient_unavailable_or_paid", "name": choice["name"]})
             if group.get("kind") == "single_choice":
                 if quantity:
@@ -226,13 +227,20 @@ def apply_preferred_modifiers(detail, preference, groups):
 
 
 def selected_modifier_extra(public, selections):
-    """Add only explicitly selected optional fees; defaults are validated free."""
+    """Price only the selected option, including same-code single-choice keys."""
     if not selections or not public:
         return 0
-    chosen = {s["code"]: s["quantity"] for s in selections}
-    return sum(cents(c["extra_cny"]) * chosen.get(c["code"], 0)
-               for group in public.get("groups", []) if group.get("kind") == "optional_choice"
-               for c in group["choices"])
+    chosen = {s["code"]: s for s in selections}
+    total = 0
+    for group in public.get("groups", []):
+        for choice in group["choices"]:
+            selection = chosen.get(choice["code"])
+            if not selection or not selection["quantity"]:
+                continue
+            if (group.get("kind") == "optional_choice" or group.get("kind") == "single_choice"
+                    and selection.get("key") == choice.get("key")):
+                total += cents(choice["extra_cny"]) * selection["quantity"]
+    return total
 
 
 def configuration_extra(detail, modifiers, groups):

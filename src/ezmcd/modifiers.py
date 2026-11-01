@@ -9,6 +9,19 @@ import re
 from .errors import EzMcdError
 
 
+def paid_binary_choice(group):
+    """Observed add-on: one free default (0-0), one priced choice (0-1)."""
+    values = group.get("values", [])
+    if len(values) != 2 or group.get("_kind") != "single_choice":
+        return False
+    by_key = {v["selectedKey"]: v for v in values}
+    if set(by_key) != {"0-0", "0-1"}:
+        return False
+    free, paid = by_key["0-0"], by_key["0-1"]
+    return (free["price"] == 0 and free["selectedQuantity"] == 1
+            and paid["selectedQuantity"] == 0 and 0 < paid["price"] <= 100000)
+
+
 def modifier_groups(product):
     if product.get("grills") or product.get("biasChoices"):
         raise EzMcdError("advanced_customization_requires_official_cart")
@@ -93,8 +106,12 @@ def selected_modification(product, selections=None):
             else:
                 choice = choices[options[0]["code"]]
                 selected = [v for v in options if v["selectedKey"] == choice.key and choice.quantity == 1]
-            if len(selected) != 1 or selected[0]["soldOut"] or selected[0]["price"] != 0:
-                raise EzMcdError("select_one_available_free_modifier_choice")
+            if len(selected) != 1 or selected[0]["soldOut"]:
+                raise EzMcdError("select_one_available_supported_modifier_choice")
+            if selected[0]["price"]:
+                if choices is None or not paid_binary_choice(group) or selected[0]["selectedKey"] != "0-1":
+                    raise EzMcdError("select_one_available_supported_modifier_choice")
+                prices[selected[0]["code"]] = selected[0]["price"]
             values.append({"code": selected[0]["code"], "quantity": 1, "key": selected[0]["selectedKey"]})
         else:
             quantities = {v["code"]: choices[v["code"]].quantity if choices is not None else v["selectedQuantity"] for v in options}
@@ -116,12 +133,13 @@ def public_modifiers(product):
     except (EzMcdError, TypeError, KeyError, AttributeError):
         return {"supported": False, "groups": [], "reason": "advanced_customization_requires_official_cart"}
     from .models import yuan
-    return {"supported": True, "selection_rule": "Specify every active code once: toggle and optional_choice use quantity 0/1 without key; single_choice uses quantity=1 and the selected listed key. Inactive groups are omitted. Optional choices may cost extra; always obtain a fresh quote.",
+    return {"supported": True, "selection_rule": "Specify every active code once: toggle and optional_choice use quantity 0/1 without key; single_choice uses quantity=1 and the selected listed key. Inactive groups are omitted. Optional replacements and supported binary add-ons may cost extra; always obtain a fresh quote.",
         "groups": [{"index": i, "name": g.get("title", ""), "kind": g["_kind"], "inactive": g["_inactive"],
             "min_quantity": g["minValues"], "max_quantity": g["maxValues"],
             "choices": [{"code": v["code"], "name": v.get("name", ""), "default_quantity": v["selectedQuantity"],
                          "available": not v["soldOut"], "extra_cny": yuan(v["price"]),
-                         "selection_supported": g["_kind"] != "single_choice" or v["price"] == 0,
+                         "selection_supported": g["_kind"] != "single_choice" or v["price"] == 0 or paid_binary_choice(g),
+                         "paid_selection_supported": g["_kind"] == "optional_choice" or v["price"] > 0 and paid_binary_choice(g),
                          **({"key": v["selectedKey"]} if g["_kind"] == "single_choice" else {})}
                         for v in g["values"]]} for i, g in enumerate(groups)]}
 
@@ -148,8 +166,8 @@ def configuration_keys(actual, *, allow_paid=False):
             raise ValueError
         if any("price" in v and (type(v["price"]) is not int or v["price"] != 0) for v in options):
             raise ValueError
-        # Group code/key identifies the choice. Paid optional replacements use
-        # key 0-1 and one selected value; their exact price is compared separately.
+        # Paid optional replacements and binary add-ons use key 0-1 and one
+        # selected value; their exact observed price is compared separately.
         for item in items:
             values = item["values"]
             if (not isinstance(values, list) or len(values) != 1

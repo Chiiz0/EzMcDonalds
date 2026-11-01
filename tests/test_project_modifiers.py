@@ -171,7 +171,7 @@ class ModifierTests(unittest.TestCase):
                 selected_modification(iced_coffee(), [ModifierSelection(**v) for v in values])
         for change in ({"price": 100}, {"soldOut": True}):
             p = iced_coffee(); p["modification"]["items"][0]["values"][3].update(change)
-            with self.assertRaisesRegex(EzMcdError, "available_free"):
+            with self.assertRaisesRegex(EzMcdError, "available_supported"):
                 selected_modification(p, [ModifierSelection(code="222", quantity=1, key="1-1")])
             self.assertTrue(public_modifiers(p)["supported"])
 

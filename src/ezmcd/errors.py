@@ -8,6 +8,7 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "select_one_available_supported_modifier_choice": ("未选中一个可售且已支持的配料选项。", "重新查看实时商品详情，按组选择准确的key；收费加料须有明确加价，不能用免费选项代替用户选择或忽略费用。"),
         "modifier_choice_unavailable": ("所选可选配料已售罄。", "重新读取 product_detail；不要自动取消用户要求的换奶或其他选择后继续购买。"),
         "variant_combo_schema_or_price_changed": ("该套餐规格的轮次、默认份数或价格公式不符合已支持结构。", "重新读取父商品详情；不要猜测加价或把规格展示价再叠加默认饮品费用。此时可在官方 App 配置后核对购物车。"),
         "sampling_capture_directory_invalid": ("这不是当前数据目录内的私有采样目录。", "使用本次 sampling-capture 输出的 captures/编号 目录，保持原目录和权限，不使用符号链接或其他账号的数据目录。"),
