@@ -36,6 +36,7 @@ def build_server(service):
     server = MCPServer("EzMcDonald's", version=__version__, log_level="WARNING",
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
+        "After a login/session change, runtime_recovery_available allows account_runtime_restore to verify this member's saved recent device evidence without new sampling; it never extends observation age or spending permission. "
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
         "With a nonempty cart, pickup_methods reports the initial confirmation's fulfillment options. Locker-in and take-in-store are implemented. "
         "If the requested method is not selected, use checkout_quote_pickup with a fresh cart_ref and stable key; its READY result is the quote to review and submit. "
@@ -72,6 +73,7 @@ def build_server(service):
             "expired_cart_intents": "local list and explicit retirement of unresolved addition/pickup preparations only after their pickup time; retained request and write claim, no upstream calls or financial changes; old keys never replay, new meal still requires current-cart review",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; one reused-context order POST/payment accepted, cross-day validity unverified",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
+            "runtime_recovery": "retain this member's recent observation after login/session changes on the exact same device context; explicit account_runtime_restore uses one fixed v5 GET before activation, preserves original age and all purchase records; no independent device initialization or cross-day renewal",
             "local_guarded_capture": "Mac CLI sampling-capture only; requires local certificate and manual official App operation; blocks order requests before upstream, restores proxy after App closes; does not import automatically or enable spending; real no-order sampling verified",
             "local_request_import": "CLI only: copy one signed balance request as cURL/raw HTTP, then connect --clipboard on Mac or --request-file; validates signature and live balance, never executes copied commands; runtime supports the same text sources and discards the order body",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
@@ -110,6 +112,13 @@ def build_server(service):
         """Check this account's observed v5 runtime with one fixed order-list GET. Can inspect historical evidence, but does not renew it, change account files, authorize checkout, or prove order POST acceptance."""
         from .runtime_check import check_runtime
         return check_runtime(service.store, account)
+
+    @server.tool(annotations=CART)
+    @protected
+    def account_runtime_restore(account: str) -> dict:
+        """After this member logs in or refreshes on the same device, verify saved recent runtime with one fixed v5 order-list GET and activate it locally. Requires runtime_recovery_available; repeated successful recovery only verifies the same evidence again. Never renews observation time, generates device fields, refreshes a token, creates an order or changes spending permission. Expired/missing evidence still needs the official App."""
+        from .runtime_recovery import restore_runtime
+        return restore_runtime(service.store, account)
 
     @server.tool(annotations=READ)
     @protected

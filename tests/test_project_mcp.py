@@ -32,6 +32,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(next(t for t in tools if t.name == "cart_clear").annotations.destructive_hint)
                 self.assertIn("account_refresh", names)
                 self.assertIn("account_runtime_check", names)
+                restore = next(t for t in tools if t.name == "account_runtime_restore")
+                self.assertFalse(restore.annotations.read_only_hint)
+                self.assertTrue(restore.annotations.idempotent_hint)
                 history = next(t for t in tools if t.name == "orders_list")
                 self.assertTrue(history.annotations.read_only_hint)
                 self.assertFalse(history.annotations.open_world_hint)
@@ -59,6 +62,8 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("session_refresh_requires_real_account", refresh_result.content[0].text)
                 runtime_result = await client.call_tool("account_runtime_check", {"account": "demo"})
                 self.assertIn("runtime_check_requires_active_real_account", runtime_result.content[0].text)
+                restore_result = await client.call_tool("account_runtime_restore", {"account": "demo"})
+                self.assertIn("active_official_account_required_for_runtime_update", restore_result.content[0].text)
                 instructions = await client.call_tool("account_connection_instructions", {})
                 self.assertIn("--device-from", instructions.content[0].text)
                 pickup = (datetime.now(SHANGHAI) + timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
@@ -145,7 +150,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                                            env={"EZMCD_DATA_DIR": str(store.root)})
             async with Client(params) as client:
                 tool_map = {t.name: t for t in (await client.list_tools()).tools}
-                self.assertEqual(len(tool_map), 35)
+                self.assertEqual(len(tool_map), 36)
                 self.assertTrue(tool_map["cart_operations_list"].annotations.read_only_hint)
                 self.assertFalse(tool_map["cart_operations_list"].annotations.open_world_hint)
                 self.assertTrue(tool_map["cart_operation_retire"].annotations.destructive_hint)

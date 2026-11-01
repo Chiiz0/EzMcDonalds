@@ -84,6 +84,12 @@ def refresh_account(store, alias, *, provider_factory=McdProvider, transport_fac
         sid_changed = fields["sid"] != state["candidate_fields"]["sid"]
         if sid_changed:
             candidate["runtime"] = None
+            from .runtime_recovery import retain_candidate
+            evidence = retain_candidate(record, candidate, clock())
+            if evidence:
+                candidate["runtime_candidate"] = evidence
+            else:
+                candidate.pop("runtime_candidate", None)
         candidate["session_refresh"] = {k: v for k, v in state.items() if k != "candidate_fields"} | {
             "state": "REFRESHED", "completed_at": clock(), "sid_changed": sid_changed,
             "result_fingerprint": session_fingerprint(candidate["profile"]["fields"])}

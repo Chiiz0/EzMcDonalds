@@ -42,6 +42,7 @@ def main():
     runtime_source.add_argument("--sample", help="Private same-session official v5 request JSON")
     runtime_source.add_argument("--har", help="Private HAR with same-session official v5 evidence; no balance entry required")
     runtime_source.add_argument("--device-from", help="Explicitly reuse recent evidence from the same official device; validates only a v5 GET, not an order")
+    runtime_source.add_argument("--previous-device", action="store_true", help="Verify this member's recent saved device evidence after a session change; never renews its observation time")
     runtime_source.add_argument("--paste-headers", action="store_true", help="Paste sid, token and x-mcd-sign privately from your official request; never sends an order")
     runtime_source.add_argument("--clipboard", action="store_true", help="Read one copied cURL/raw request from macOS clipboard; never executes it")
     runtime_source.add_argument("--request-file", help="Private text file containing one copied cURL/raw request")
@@ -177,6 +178,9 @@ def main():
                 elif args.paste_headers:
                     from .accounts import interactive_runtime
                     result = interactive_runtime(store, args.alias)
+                elif args.previous_device:
+                    from .runtime_recovery import restore_runtime
+                    result = restore_runtime(store, args.alias)
                 else:
                     result = (update_runtime_from_device(store, args.alias, args.device_from) if args.device_from
                               else update_runtime(store, args.alias, args.har or args.sample, har=bool(args.har)))

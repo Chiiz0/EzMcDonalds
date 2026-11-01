@@ -119,6 +119,7 @@ def _update_runtime_evidence(store, alias, sample):
         from .provider import McdProvider
         McdProvider(record).wallet()
         record["runtime"] = runtime
+        record.pop("runtime_candidate", None)
         return record
     updated = store.modify_account(alias, update)
     return public_account(updated, session_verified=True) | {"runtime_updated": True,
@@ -191,6 +192,7 @@ def update_runtime_from_device(store, alias, source_alias):
         runtime.update(source="same_official_device_readonly_verified", verified_at=time.time(),
                        verified_session_fingerprint=fingerprint({"sid": new["fields"]["sid"]}))
         record["runtime"] = runtime
+        record.pop("runtime_candidate", None)
         return record
     updated = store.modify_account(alias, update)
     return public_account(updated, session_verified=True) | {"runtime_updated": True,
@@ -238,12 +240,24 @@ def _enroll(store, alias, profile, binary, runtime_sample, phone_label, *, updat
                 if previous.get("refreshToken") and not fields.get("refreshToken"):
                     fields["refreshToken"] = previous["refreshToken"]
                 if runtime_sample is None and old.get("runtime"):
-                    record["runtime"] = old["runtime"]
+                    # Preserve an unchanged session even when both observed
+                    # profiles lack d. Crossing sessions requires complete
+                    # device evidence and a new GET, handled below.
+                    if (old["profile"].get("build_sha256") == profile["build_sha256"]
+                            and previous.get("riskDeviceId") == fields.get("riskDeviceId")
+                            and all(old["profile"].get("client_headers", {}).get(k) == profile["client_headers"][k]
+                                    for k in ("ct", "v", "language"))):
+                        record["runtime"] = old["runtime"]
                 if old.get("session_refresh"):
                     record["session_refresh"] = old["session_refresh"]
                 for key in ("auth_method", "phone_ownership_verified_by_project"):
                     if key in old:
                         record[key] = old[key]
+            if runtime_sample is None and record["runtime"] is None:
+                from .runtime_recovery import retain_candidate
+                candidate = retain_candidate(old, record, time.time())
+                if candidate:
+                    record["runtime_candidate"] = candidate
             return record
         store.modify_account(alias, replace)
     else:
@@ -258,6 +272,7 @@ def revoke_local(store, alias):
     def remove(record):
         record.pop("profile", None)
         record.pop("runtime", None)
+        record.pop("runtime_candidate", None)
         record.pop("session_refresh", None)
         record["revoked"] = True
         record["policy"]["allow_checkout"] = False
@@ -268,6 +283,7 @@ def revoke_local(store, alias):
 
 
 def public_account(record, *, session_verified=False):
+    from .runtime_recovery import recovery_available
     runtime = record.get("runtime")
     demo = record["provider"] == "demo"
     revoked = bool(record.get("revoked"))
@@ -299,9 +315,10 @@ def public_account(record, *, session_verified=False):
         "session_status": session_status,
         "sms_login_supported": record["provider"] == "mcd-cn", "sms_login_requires_official_device_context": True,
         "runtime_available": runtime_available,
+        "runtime_recovery_available": recovery_available(record, time.time()),
         "runtime_evidence": {"maximum_observation_age_hours": 24,
             "age_hours": round((time.time() - runtime["observed_at"]) / 3600, 2) if runtime and not revoked else None,
-            "verification_scope": ("v5_order_list_get" if runtime.get("source") == "same_official_device_readonly_verified"
+            "verification_scope": ("v5_order_list_get" if runtime.get("source") in ("same_official_device_readonly_verified", "previous_own_device_readonly_verified")
                                    else "official_request_reconstruction") if runtime and not revoked else None},
         "session_refresh_supported": bool(not revoked and fields.get("refreshToken") and refresh_state not in ("CLAIMED", "STOPPED")),
         "session_refresh_state": refresh_state,

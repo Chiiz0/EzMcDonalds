@@ -33,6 +33,7 @@
 | `preferences_get` | 读取偏好 | 本地只读 |
 | `preferences_save` | 保存门店、餐品、配料和取餐偏好 | 本地写入；不授权消费、不创建调度 |
 | `account_runtime_check` | 检查现有 v5 运行字段，包括历史样本 | 固定一次 GET；不续期、不授权下单 |
+| `account_runtime_restore` | 登录切换后恢复本人同设备近期运行样本 | 固定一次 GET 后本机启用；原采样时间、消费策略和购买日志不变 |
 | `meal_plan` | 按实时菜单、时段与偏好准备草案 | 只读，不加购或购买 |
 | `membership_assets` | 权益卡有效期、券分类数量 | 只读 |
 | `cities_list` | 城市名称及代码 | 只读 |

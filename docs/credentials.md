@@ -24,6 +24,8 @@ ezmcd account login personal --device-from existing-account
 
 同一会员重新登录会保留原别名、消费策略和订单日志。缺少 `d` / `deviceToken` 时，不会尝试用随机字符串发送短信，先按下一节获取本人官方上下文。[详细登录与恢复规则](sms-login.md)。
 
+重新登录后若 `runtime_recovery_available=true`，本人原设备的近期运行样本已作为待核验资料保留。可运行 `ezmcd account runtime personal --previous-device`，或让 Agent 调用 `account_runtime_restore`，通过固定只读请求后恢复使用，避免重复采集同一份资料。它不延长原采样日期；超过24小时、设备上下文变化或没有旧样本时仍须更新。[恢复步骤](session-maintenance.md#恢复近期的本人设备样本)。
+
 ## 从自己的官方 App 导入
 
 需要反复采样的 Mac 用户可选择[持久采样证书](sampling-certificate.md)，首次授权后复用。下文的“移除临时证书”仅针对临时方案；持久方案仍须每轮恢复代理，停用时显式撤销证书。

@@ -8,6 +8,8 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "runtime_already_available_use_account_check": ("当前会话已有近期运行字段。", "无需恢复旧样本；用 account_check 核对会话，之后按原消费策略和实时报价继续。"),
+        "previous_runtime_unavailable_update_official_evidence": ("没有可恢复的同设备近期运行样本。", "用 account_diagnose 核对状态。旧样本缺失、超过24小时或设备字段变化时，通过官方 App 的授权采样更新；不修改采样日期。"),
         "cart_key_reused_for_different_request": ("同一加购幂等键对应了不同的请求。", "用 cart_add_status 查原操作；不要修改商品、门店、时段或预算后沿用原键。"),
         "cart_addition_unresolved_query_status": ("本账号有尚未核对完成的加购。", "先 cart_add_status 或 cart_operations_list 找回原请求；不换键重加。取餐时间未过时按原请求核对和明确清空；已过时且用户放弃这顿餐，可用 cart_operation_retire 保留日志并结束本地意图，再查看新餐的当前购物车。"),
         "invalid_cart_operations_filter": ("本地选餐记录筛选参数无效。", "unresolved_only 使用布尔值，limit 为1至100，offset 为0至10000。"),
