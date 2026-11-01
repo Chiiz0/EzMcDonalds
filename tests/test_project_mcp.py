@@ -26,6 +26,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 names = {tool.name for tool in tools}
                 self.assertIn("checkout_submit", names)
                 self.assertIn("product_detail", names)
+                self.assertTrue(next(t for t in tools if t.name == "pickup_methods").annotations.read_only_hint)
                 self.assertIn("cart_add_configured", names)
                 self.assertTrue(next(t for t in tools if t.name == "cart_add_status").annotations.read_only_hint)
                 self.assertTrue(next(t for t in tools if t.name == "cart_clear").annotations.destructive_hint)
@@ -85,6 +86,10 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                     "items": [{"product_code": "100001", "quantity": 1}], "idempotency_key": "mcp-cart"})).content[0].text)
                 self.assertFalse(added["order_created"])
                 self.assertEqual(added["state"], "MATCHED")
+                methods = json.loads((await client.call_tool("pickup_methods", {"request": request})).content[0].text)
+                self.assertEqual(methods["selected_method"], "locker-in")
+                self.assertTrue(methods["requested_method_selected"])
+                self.assertFalse(methods["cart_changed"])
                 recovered_cart = json.loads((await client.call_tool("cart_add_status", {"account": "demo"})).content[0].text)
                 self.assertEqual(recovered_cart["operation_id"], added["operation_id"])
                 self.assertTrue(recovered_cart["cart_matches_requested"])

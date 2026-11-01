@@ -3,7 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import uuid
 
-from .catalog import checkout
+from .catalog import checkout, pickup_methods
 from .errors import EzMcdError
 from .models import Policy, SHANGHAI, fingerprint, pickup_time, yuan
 from .discovery import pickup_choices, restaurant
@@ -75,6 +75,17 @@ class DemoProvider:
     def reservation(self, code):
         self.store(code)
         return {"simulation": True, "message": "Demo accepts future pickup times with minute precision."}
+
+    def pickup_methods(self, args):
+        self.store(args.store_code)
+        if pickup_time(args.pickup_at) <= datetime.now(timezone.utc):
+            raise EzMcdError("pickup_time_has_passed")
+        if not self.read()["cart_quantity"]:
+            raise EzMcdError("cart_empty_or_unavailable")
+        return pickup_methods(args, {"submit": 1, "orderType": "1", "storeInfo": self.store(args.store_code),
+            "dayPart": {"dayPartCode": "2"}, "storePickUpInfo": {
+                "pickupExpectTimeValue": pickup_time(args.pickup_at).strftime("%Y-%m-%d %H:%M"),
+                "eatTypeOptions": [{"code": "locker-in", "text": "外带", "subText": "演示取餐柜", "selected": True}]}}, "2") | {"simulation": True}
 
     def menu(self, args, keyword=""):
         self.store(args.store_code)

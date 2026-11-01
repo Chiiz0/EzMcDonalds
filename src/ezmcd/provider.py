@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 import json
 import re
 
-from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items, menu_categories, membership_assets
+from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items, menu_categories, membership_assets, pickup_methods
 from .errors import EzMcdError
 from .discovery import cities, pickup_choices, resolve_city, store_results
 from .models import pickup_time, cents, yuan, fingerprint
@@ -179,12 +179,19 @@ class McdProvider:
         return params | {"cartType": "1", "channelCode": "03", "pinId": "", "dataSource": 1,
                          "daypartCode": daypart, "scenes": "", "products": products}
 
+    def _confirmation(self, args, daypart, params):
+        return self.get("/bff/order/confirmation/info", {"mealTypeId": "1", "orderType": "1",
+            "storeCode": args.store_code, "beCode": "", "dayPartCode": daypart, "expectDeliveryTime": "",
+            "date": params["date"], "time": params["time"], "addressId": ""})
+
+    def pickup_methods(self, args):
+        daypart, params = self.context(args)
+        return pickup_methods(args, self._confirmation(args, daypart, params), daypart)
+
     def quote(self, args):
         daypart, params = self.context(args)
         cart = self.get("/bff/cart/carts", params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart})
-        confirmation = self.get("/bff/order/confirmation/info", {"mealTypeId": "1", "orderType": "1",
-            "storeCode": args.store_code, "beCode": "", "dayPartCode": daypart, "expectDeliveryTime": "",
-            "date": params["date"], "time": params["time"], "addressId": ""})
+        confirmation = self._confirmation(args, daypart, params)
         return checkout(args, cart, confirmation, daypart)
 
     def simple_cart_draft(self, args, selections):
@@ -302,14 +309,37 @@ class McdProvider:
 
     @staticmethod
     def validate_order(attempt, quote, order):
-        expected = sorted((x["product_code"], x["quantity"]) for x in quote["items"])
-        actual = sorted((str(x["productCode"]), x["quantity"]) for x in order.get("orderProductList", []))
+        try:
+            expected = sorted((x["product_code"], x["quantity"]) for x in quote["items"])
+            actual = sorted((str(x["productCode"]), x["quantity"]) for x in order.get("orderProductList", []))
+            if any(type(quantity) is not int or not 1 <= quantity <= 20 for _, quantity in expected + actual):
+                raise ValueError
+        except (KeyError, TypeError, ValueError):
+            raise EzMcdError("created_order_does_not_match_quote") from None
         if (order.get("orderId") != attempt["order_id"] or order.get("payId") != attempt["pay_id"]
                 or str(order.get("storeCode")) != quote["store_code"] or order.get("lockerOrder") is not True
                 or order.get("expectPickUpTime") != pickup_time(quote["pickup_at"]).strftime("%Y-%m-%d %H:%M:%S")
                 or cents(order.get("realTotalAmount")) != quote["amount_cents"] or expected != actual):
             raise EzMcdError("created_order_does_not_match_quote")
-        expected_components = sorted((i["code"], i["quantity"]) for x in quote["items"] for g in x["components"] for i in g["comboProducts"])
-        actual_components = sorted((i["productCode"], i["quantity"]) for x in order.get("orderProductList", []) for i in x.get("comboItemList", []))
+        # Keep components bound to their parent row, including its quantity.
+        # Flattening all combos together would accept drinks swapped between
+        # different meals, or between one-portion and two-portion rows.
+        def component_key(rows, code_key):
+            result = []
+            for row in rows:
+                code, quantity = row[code_key], row["quantity"]
+                if not isinstance(code, (str, int)) or isinstance(code, bool) or not str(code):
+                    raise ValueError
+                if type(quantity) is not int or not 1 <= quantity <= 20:
+                    raise ValueError
+                result.append((str(code), quantity))
+            return tuple(sorted(result))
+        try:
+            expected_components = sorted((x["product_code"], x["quantity"], component_key(
+                [i for g in x["components"] for i in g["comboProducts"]], "code")) for x in quote["items"])
+            actual_components = sorted((str(x["productCode"]), x["quantity"], component_key(
+                x.get("comboItemList", []), "productCode")) for x in order.get("orderProductList", []))
+        except (KeyError, TypeError, ValueError):
+            raise EzMcdError("created_order_components_changed") from None
         if expected_components != actual_components:
             raise EzMcdError("created_order_components_changed")

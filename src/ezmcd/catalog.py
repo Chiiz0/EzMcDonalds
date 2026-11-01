@@ -134,6 +134,55 @@ def verify_confirmation_components(product, rows):
         raise EzMcdError("confirmation_components_mismatch") from None
 
 
+def pickup_methods(args, confirmation, daypart):
+    """Report the server's actual options; never select a fallback on its behalf."""
+    if (confirmation.get("submit") != 1 or str(confirmation.get("orderType")) != "1"
+            or str(confirmation.get("storeInfo", {}).get("storeCode")) != args.store_code
+            or str(confirmation.get("dayPart", {}).get("dayPartCode")) != daypart):
+        raise EzMcdError("confirmation_store_or_fulfillment_mismatch")
+    selected = confirmation.get("storePickUpInfo", {})
+    if selected.get("pickupExpectTimeValue") != pickup_time(args.pickup_at).strftime("%Y-%m-%d %H:%M"):
+        raise EzMcdError("confirmation_pickup_time_or_method_mismatch")
+    rows = selected.get("eatTypeOptions")
+    if not isinstance(rows, list) or not rows or any(
+            not isinstance(row, dict) or not isinstance(row.get("code"), str) or not row["code"]
+            or type(row.get("selected", False)) is not bool for row in rows):
+        raise EzMcdError("pickup_methods_schema_changed")
+    codes = [row["code"] for row in rows]
+    chosen = [row["code"] for row in rows if row.get("selected") is True]
+    if len(set(codes)) != len(codes) or len(chosen) > 1:
+        raise EzMcdError("pickup_methods_schema_changed")
+    matches = chosen == [args.eat_type]
+    return {"store_code": args.store_code, "pickup_at": args.pickup_at, "requested_method": args.eat_type,
+        "requested_method_available": args.eat_type in codes, "requested_method_selected": matches,
+        "selected_method": chosen[0] if chosen else None,
+        "methods": [{"code": row["code"], "name": row.get("text", ""), "description": row.get("subText", ""),
+                     "selected": row.get("selected", False), "checkout_supported": row["code"] == "locker-in"} for row in rows],
+        "next_action": "checkout_quote" if matches else "select_requested_method_in_official_app" if args.eat_type in codes
+                       else "use_official_app_or_choose_supported_store",
+        "cart_changed": False, "order_created": False, "payment_attempted": False,
+        "quote_and_policy_checks_still_required": True}
+
+
+def cart_regular_subtotal(product):
+    if "subTotalPrice" in product:
+        value = product["subTotalPrice"]
+        if type(value) is int and value >= 0:
+            return value
+        raise EzMcdError("cart_product_price_structure_unverified")
+    # Observed ordinary-item carts omit subTotalPrice, retaining unit prices.
+    # Do not extrapolate this fallback to coupons, combos or modifications.
+    original, actual, quantity = (product.get(k) for k in ("originPrice", "realPrice", "quantity"))
+    if (str(product.get("type")) != "1" or any(product.get(k) for k in (
+            "coupon", "comboItems", "customization", "modification", "grills", "biasChoices"))
+            or any(type(v) is not int for v in (original, actual, quantity))
+            or not 1 <= quantity <= 20 or not 0 < actual == original
+            or type(product.get("realSubTotalPrice")) is not int
+            or actual * quantity != product["realSubTotalPrice"]):
+        raise EzMcdError("cart_product_price_structure_unverified")
+    return original * quantity
+
+
 def checkout(args, cart, confirmation, daypart):
     pickup = pickup_time(args.pickup_at)
     if (str(cart.get("storeCode")) != args.store_code or cart.get("beType") != 1
@@ -145,14 +194,7 @@ def checkout(args, cart, confirmation, daypart):
         raise EzMcdError("cart_empty_or_unavailable")
     if any(type(p.get("quantity")) is not int or not 1 <= p["quantity"] <= 20 or str(p.get("type")) not in ("1", "7") for p in products):
         raise EzMcdError("product_type_or_quantity_not_supported")
-    if (confirmation.get("submit") != 1 or str(confirmation.get("orderType")) != "1"
-            or str(confirmation.get("storeInfo", {}).get("storeCode")) != args.store_code
-            or str(confirmation.get("dayPart", {}).get("dayPartCode")) != daypart):
-        raise EzMcdError("confirmation_store_or_fulfillment_mismatch")
-    selected = confirmation.get("storePickUpInfo", {})
-    choices = [x for x in selected.get("eatTypeOptions", []) if x.get("selected") is True]
-    if (selected.get("pickupExpectTimeValue") != pickup.strftime("%Y-%m-%d %H:%M")
-            or len(choices) != 1 or choices[0].get("code") != args.eat_type):
+    if not pickup_methods(args, confirmation, daypart)["requested_method_selected"]:
         raise EzMcdError("confirmation_pickup_time_or_method_mismatch")
     price = confirmation["productPriceInfo"]
     amount = cents(price["realTotalAmount"])
@@ -174,7 +216,8 @@ def checkout(args, cart, confirmation, daypart):
                 or row.get("quantity") != p["quantity"] or row.get("productName") != p["name"]
                 or str(row.get("productType")) != str(p["type"]) or row.get("saleStatus") != 1
                 or not row.get("uniqueKey") or cents(row.get("realSubtotal")) != p["realSubTotalPrice"]
-                or cents(row.get("subtotal")) != p["subTotalPrice"]):
+                or cents(row.get("subtotal")) != cart_regular_subtotal(p)
+                or "subTotalPrice" not in p and cents(row.get("price")) != p["originPrice"]):
             raise EzMcdError("confirmation_product_mismatch")
         seen.add(seq)
         verify_confirmation_components(p, row.get("comboItemList", []))

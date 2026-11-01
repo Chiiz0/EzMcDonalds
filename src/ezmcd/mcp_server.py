@@ -37,6 +37,7 @@ def build_server(service):
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
+        "With a nonempty cart, pickup_methods reports actual restaurant fulfillment options. Only locker-in is implemented; never substitute dine-in or counter pickup. "
         "To change a nonempty cart, inspect cart_get and use its short-lived cart_ref with cart_clear only when the user wants those items removed. "
         "After cart addition, only MATCHED suggests a fresh quote. On a lost reply or restart use cart_add_status; never switch keys to repeat an unresolved addition. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
@@ -54,9 +55,12 @@ def build_server(service):
             "sms_login_via_mcp": False, "session_auto_refresh": False,
             "session_refresh": "explicit account_refresh; local 24h rotation interval, no ambiguous POST retries",
             "stores": "city/name search or explicit coordinates, favorites, live pickup slots; compatible locker pickup required",
+            "pickup_methods": "read actual confirmation-page methods for a nonempty cart; report selected/available/supported separately; never change fulfillment or infer locker support from store tags",
             "meal_preferences": "local saved products, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
             "membership_assets": "card validity and coupon category counts; coupons_list queries current store/time availability and coupon_products lists matching products",
             "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
+            "ordinary_cart_evidence": "two plain hash browns, and a hash brown plus fried dough stick: real addition, CNY17.00 quotes and clear; no new payment; another store's cart matched but counter-only fulfillment stopped quoting",
+            "order_components": "verified against each parent product and quantity before payment; swapping components across distinct meal rows is rejected",
             "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
             "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks; ordinary coupon payment unverified",
             "cart_changes": "cart_get/cart_add return a 120-second member/store/time-bound reference; explicit cart_clear rechecks the complete cart and sends once; repeats only query; real clear and repeat verified, no cross-client atomic lock",
@@ -193,6 +197,14 @@ def build_server(service):
         """Get currently available pickup dates, times, and meal periods for a store."""
         _, provider = service.provider(account)
         return provider.pickup_slots(store_code)
+
+    @server.tool(annotations=READ)
+    @protected
+    def pickup_methods(request: CheckoutInput) -> dict:
+        """With a nonempty cart, read actual confirmation-page pickup methods and selection. Available does not mean implemented: only locker-in is supported. Never switches the method or quotes/pays. Empty-cart upstream rejection is not proof that a method is unavailable."""
+        account, provider = service.provider(request.account)
+        with service.store.lock(account["identity"]):
+            return provider.pickup_methods(request)
 
     @server.tool(annotations=READ)
     @protected

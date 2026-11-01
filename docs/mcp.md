@@ -42,6 +42,7 @@
 | `stores_favorites` | 收藏门店 | 只读 |
 | `store_get` | 按代码查店 | 只读 |
 | `pickup_slots` | 北京时间具体可预约时间、餐段 | 只读 |
+| `pickup_methods` | 非空车确认页的可用、已选及项目支持的取餐方式 | 只读；不切换方式、不报价 |
 | `menu_list` | 门店/时段菜单、名称过滤 | 只读 |
 | `coupons_list` | 当前账号、门店和时段的券、适用状态与规则 | 只读 |
 | `coupon_products` | 使用当前 coupon_ref 查询对应商品 | 只读 |
@@ -82,6 +83,8 @@
 ```
 
 门店、日期仅为格式示例，必须使用真实门店与可预约时段。金额为元字符串，内部使用整数分。报价返回商品组件、优惠、最终金额、`quote_id`及过期时间。
+
+门店搜索结果和可预约时段不代表支持取餐柜。购物车非空时可调用 `pickup_methods`，结果分别给出 `requested_method_available`、`requested_method_selected` 和每项的 `checkout_supported`。目前只有 `locker-in` 可进入报价；`take-in-store` 是柜台自取，`eat-in` 是堂食，不能替换。若取餐柜可用但未选中，先在官方 App 选择再重新读取；项目不调用取餐方式切换接口。空车时官方确认页可能拒绝查询，不能据此断定门店没有该方式。取餐方式匹配仍不代替报价和消费策略检查。
 
 用户已授权消费且本地策略允许时，调用`checkout_submit`：
 
