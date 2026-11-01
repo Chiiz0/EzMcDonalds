@@ -98,6 +98,14 @@ def main():
     cart_status = commands.add_parser("cart-status", help="Query a recorded cart addition without sending it again; defaults to the latest")
     cart_status.add_argument("account")
     cart_status.add_argument("--operation-id")
+    cart_operations = commands.add_parser("cart-operations", help="List local cart/pickup intents without network access; unresolved by default")
+    cart_operations.add_argument("account")
+    cart_operations.add_argument("--all", action="store_true", dest="all_operations")
+    cart_operations.add_argument("--limit", type=int, default=20)
+    cart_operations.add_argument("--offset", type=int, default=0)
+    retire = commands.add_parser("cart-retire", help="Abandon one unresolved local intent after pickup time; never clears carts or cancels/pays orders")
+    retire.add_argument("account")
+    retire.add_argument("--operation-id", required=True)
     history = commands.add_parser("orders", help="Find this account's local purchase records without a login or network call")
     history.add_argument("account")
     history.add_argument("--date", dest="pickup_date", help="Pickup date YYYY-MM-DD in Asia/Shanghai")
@@ -230,6 +238,10 @@ def main():
             result = service.orders(args.account, pickup_date=args.pickup_date, state=args.state, limit=args.limit, offset=args.offset)
         elif args.command == "cart-status":
             result = service.cart_add_status(args.account, args.operation_id)
+        elif args.command == "cart-operations":
+            result = service.cart_operations(args.account, unresolved_only=not args.all_operations, limit=args.limit, offset=args.offset)
+        elif args.command == "cart-retire":
+            result = service.retire_cart_operation(args.account, args.operation_id)
         else:
             result = service.status(args.account, args.attempt_id)
         print(json.dumps(result, ensure_ascii=False, indent=2))

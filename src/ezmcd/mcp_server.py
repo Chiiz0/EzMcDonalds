@@ -42,6 +42,7 @@ def build_server(service):
         "The selection belongs to that quote: a new initial GET may still show a default. Recover lost preparation replies with checkout_quote_pickup_status; never resend an unresolved switch under a new key. "
         "To change a nonempty cart, inspect cart_get and use its short-lived cart_ref with cart_clear only when the user wants those items removed. "
         "After cart addition, only MATCHED suggests a fresh quote. On a lost reply or restart use cart_add_status; never switch keys to repeat an unresolved addition. "
+        "Use cart_operations_list to find unresolved local cart intents. If the user abandons a meal whose pickup time has passed, cart_operation_retire closes only that local intent, retains its write claim and leaves official carts and purchases untouched. Inspect the new meal's cart before continuing; never treat retirement as cancellation or proof of failure. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
         "Use a stable idempotency key per user purchase. "
         "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
@@ -68,6 +69,7 @@ def build_server(service):
             "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks; ordinary coupon payment unverified",
             "cart_changes": "cart_get/cart_add return a 120-second member/store/time-bound reference; explicit cart_clear rechecks the complete cart and sends once; repeats only query; real clear and repeat verified, no cross-client atomic lock",
             "cart_recovery": "draft and input bound before sending; same-key calls only compare the current cart; cart_add_status recovers a specific or latest recorded addition after restart; real coffee cart verified with locally injected lost reply/readback; pre-a14 records cannot be reconstructed",
+            "expired_cart_intents": "local list and explicit retirement of unresolved addition/pickup preparations only after their pickup time; retained request and write claim, no upstream calls or financial changes; old keys never replay, new meal still requires current-cart review",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; one reused-context order POST/payment accepted, cross-day validity unverified",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
             "local_guarded_capture": "Mac CLI sampling-capture only; requires local certificate and manual official App operation; blocks order requests before upstream, restores proxy after App closes; does not import automatically or enable spending; real no-order sampling verified",
@@ -240,6 +242,18 @@ def build_server(service):
     def cart_add_status(account: str, operation_id: str | None = None) -> dict:
         """Recover a cart addition using its operation_id, or the latest recorded addition if omitted. Uses saved request and choices to compare the CURRENT cart; never rebuilds the draft or resends a write. MATCHED permits a fresh quote only. EMPTY, DIFFERENT and UNAVAILABLE require review; they do not authorize retrying. Local intent remains visible after login expiry/revocation. Pre-a14 write-only records cannot be reconstructed."""
         return service.cart_add_status(account, operation_id)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))
+    @protected
+    def cart_operations_list(account: str, unresolved_only: bool = True, limit: int = 20, offset: int = 0) -> dict:
+        """Find local addition/pickup preparations, including old blockers hidden by a newer record. Default unresolved only; newest first, limit 1..100, offset 0..10000. No network or active login required. retirement_available means its pickup time passed, not that the upstream request failed. Excludes financial attempts and clear operations; use orders_list for purchases."""
+        return service.cart_operations(account, unresolved_only=unresolved_only, limit=limit, offset=offset)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=True, open_world_hint=False))
+    @protected
+    def cart_operation_retire(account: str, operation_id: str) -> dict:
+        """Explicitly abandon an unresolved LOCAL addition/pickup intent only after its pickup time passed and the user no longer wants that meal. Keeps original request, write claim and all order/payment records. Repeated calls are local-only; old keys return RETIRED without resending. Does not clear the official cart, cancel an order, refund, pay or prove upstream failure. Inspect the current cart for a new meal; never use retirement as a retry."""
+        return service.retire_cart_operation(account, operation_id)
 
     @server.tool(annotations=CART)
     @protected

@@ -124,6 +124,58 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             with store.connect() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM writes").fetchone()[0], 5)  # clear, add, three checkout stages
 
+    async def test_stdio_expired_cart_retirement_and_next_day_simulated_purchase(self):
+        from unittest.mock import patch
+        from ezmcd.demo import DemoProvider
+        from ezmcd.errors import EzMcdError
+        from ezmcd.models import CheckoutInput, ItemSelection
+        with tempfile.TemporaryDirectory() as temporary:
+            store = Store(Path(temporary))
+            setup_demo(store)
+            service = Service(store)
+            _, provider = service.provider("demo")
+            provider.write_cart({"quantity": 0})
+            past = (datetime.now(SHANGHAI) - timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
+            request = CheckoutInput(account="demo", store_code="9000001", pickup_at=past.isoformat(), max_amount_cny="20")
+            with patch("ezmcd.demo.datetime", wraps=datetime) as clock, \
+                    patch.object(DemoProvider, "write_cart", side_effect=EzMcdError("lost_response")):
+                clock.now.return_value = past - timedelta(hours=1)
+                original = service.add_simple_items(request, [ItemSelection(product_code="100001")], "old-meal")
+            params = StdioServerParameters(command=sys.executable, args=["-m", "ezmcd.mcp_server"],
+                                           env={"EZMCD_DATA_DIR": str(store.root)})
+            async with Client(params) as client:
+                tool_map = {t.name: t for t in (await client.list_tools()).tools}
+                self.assertEqual(len(tool_map), 35)
+                self.assertTrue(tool_map["cart_operations_list"].annotations.read_only_hint)
+                self.assertFalse(tool_map["cart_operations_list"].annotations.open_world_hint)
+                self.assertTrue(tool_map["cart_operation_retire"].annotations.destructive_hint)
+                self.assertFalse(tool_map["cart_operation_retire"].annotations.open_world_hint)
+                listed = json.loads((await client.call_tool("cart_operations_list", {"account": "demo"})).content[0].text)
+                self.assertTrue(listed["operations"][0]["retirement_available"])
+                retired = json.loads((await client.call_tool("cart_operation_retire", {
+                    "account": "demo", "operation_id": original["operation_id"]})).content[0].text)
+                self.assertTrue(retired["retired"])
+                self.assertFalse(retired["official_cart_changed"])
+            async with Client(params) as client:
+                repeated = json.loads((await client.call_tool("cart_add_simple", {"request": request.model_dump(),
+                    "items": [{"product_code": "100001"}], "idempotency_key": "old-meal"})).content[0].text)
+                self.assertEqual(repeated["state"], "RETIRED")
+                self.assertFalse(repeated["add_attempted"])
+                current = request.model_dump() | {"pickup_at": (past + timedelta(days=2)).isoformat()}
+                viewed = json.loads((await client.call_tool("cart_get", {"request": current})).content[0].text)
+                self.assertEqual(viewed["items"], [])
+                added = json.loads((await client.call_tool("cart_add_simple", {"request": current,
+                    "items": [{"product_code": "100001"}], "idempotency_key": "new-meal"})).content[0].text)
+                self.assertEqual(added["state"], "MATCHED")
+                quote = json.loads((await client.call_tool("checkout_quote", {"request": current})).content[0].text)
+                paid = json.loads((await client.call_tool("checkout_submit", {"account": "demo",
+                    "quote_id": quote["quote_id"], "idempotency_key": "new-purchase"})).content[0].text)
+                self.assertTrue(paid["paid_verified"])
+                self.assertTrue(paid["simulation"])
+            with store.connect() as db:
+                self.assertEqual(dict(db.execute("SELECT stage,count(*) FROM writes GROUP BY stage")),
+                                 {"cart": 2, "order": 1, "preorder": 1, "consume": 1})
+
     async def test_account_errors_do_not_expose_secrets_or_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             async with Client(build_server(Service(Store(Path(temporary))))) as client:

@@ -62,6 +62,9 @@ class CartAdditions:
             return self._status(account, record, repeated=True)
 
     def _status(self, account, record, *, repeated):
+        if record.get("retired_at") is not None:
+            from .cart_recovery import retired_status
+            return retired_status(account, record, addition=True)
         cart, query_error = None, None
         try:
             _, provider = self.service.provider(account["alias"])
@@ -90,5 +93,6 @@ class CartAdditions:
             "created_at": record["created_at"], "last_checked_at": record["last_checked_at"],
             "write_error": record["write_error"], "query_error": query_error,
             "repeated": repeated, "add_attempted": not repeated, "automatic_write_retry": False,
-            "next_action": "checkout_quote" if record["state"] == "MATCHED" else "review_cart_or_query_original_addition",
+            "next_action": ("checkout_quote" if record["state"] == "MATCHED" else
+                            "cart_operations_list" if query_error == "pickup_time_has_passed" else "review_cart_or_query_original_addition"),
             "order_created": False, "payment_attempted": False, "simulation": account["provider"] == "demo"}

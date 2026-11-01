@@ -131,6 +131,9 @@ class PickupQuotes:
 
     def _status(self, account, record, *, repeated):
         from .service import quote_summary
+        if record.get("retired_at") is not None:
+            from .cart_recovery import retired_status
+            return retired_status(account, record, addition=False)
         result, error_code = {}, None
         try:
             if time.time() >= record["created_at"] + 120:
@@ -162,5 +165,6 @@ class PickupQuotes:
             "state": record["state"], "error": error_code, "write_error": record["write_error"],
             "message": guidance.get("message"), "recovery_action": guidance.get("next_action"),
             "repeated": repeated, "switch_attempted": not repeated, "automatic_write_retry": False,
-            "next_action": "review_quote_and_policy_before_submit" if record["state"] == "READY" else "review_cart_and_original_preparation",
+            "next_action": ("review_quote_and_policy_before_submit" if record["state"] == "READY" else
+                            "cart_operations_list" if record["state"] == "EXPIRED" else "review_cart_and_original_preparation"),
             "order_created": False, "payment_attempted": False, "simulation": account["provider"] == "demo"}

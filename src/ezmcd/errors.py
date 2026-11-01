@@ -9,7 +9,12 @@ def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
         "cart_key_reused_for_different_request": ("同一加购幂等键对应了不同的请求。", "用 cart_add_status 查原操作；不要修改商品、门店、时段或预算后沿用原键。"),
-        "cart_addition_unresolved_query_status": ("本账号有尚未核对完成的加购。", "先 cart_add_status 找回原请求；不换键重加。若用户决定重新选餐，检查对应时段购物车并明确清空后再准备新请求。"),
+        "cart_addition_unresolved_query_status": ("本账号有尚未核对完成的加购。", "先 cart_add_status 或 cart_operations_list 找回原请求；不换键重加。取餐时间未过时按原请求核对和明确清空；已过时且用户放弃这顿餐，可用 cart_operation_retire 保留日志并结束本地意图，再查看新餐的当前购物车。"),
+        "invalid_cart_operations_filter": ("本地选餐记录筛选参数无效。", "unresolved_only 使用布尔值，limit 为1至100，offset 为0至10000。"),
+        "invalid_cart_recovery_reference": ("这不是可恢复的加购或取餐准备记录编号。", "从 cart_operations_list 取得完整 operation_id；订单、付款和清空操作不能通过此入口结束。"),
+        "cart_operation_not_found_for_account": ("该账号没有这条加购或取餐准备记录。", "用 cart_operations_list 在相同账号与数据目录查找；不要使用其他账号的编号。"),
+        "cart_operation_already_resolved": ("这条本地选餐记录已完成核对或明确清空。", "无需再次结束；用状态工具核对原操作，准备新餐时查看当前购物车。"),
+        "cart_operation_pickup_time_not_passed": ("原取餐时间尚未过去，不能结束这条未核对记录。", "继续查询原操作；若用户决定改餐，先核对并明确清空原购物车，不以本地结束替代查询或重试。"),
         "legacy_cart_write_query_only": ("旧版已尝试这个加购，但没有可恢复的完整草稿。", "只用 cart_get 查看现有餐品；不重发旧操作，也不根据回执猜测原选择。"),
         "cart_addition_not_found_for_account": ("该账号没有这条可恢复的加购记录。", "省略 operation_id 查询最新记录；旧版记录和官方 App 的操作需直接查看购物车。"),
         "cart_not_empty_review_before_clear": ("购物车已有餐品。", "先用 cart_get 查看；可直接报价，或在用户确实要改餐时携带其 cart_ref 调用 cart_clear，再重新加购。"),
@@ -47,7 +52,7 @@ def error_result(code):
         "pickup_already_selected_use_checkout_quote": ("初始确认页已选择所需取餐方式。", "直接调用只读 checkout_quote，无需发送切换请求。"),
         "pickup_method_unavailable_or_source_unsupported": ("所需方式不可用，或当前方式需要额外适配。", "调用 pickup_methods 核对；不从得来速等特殊流程自动切换，也不自行替换取餐方式。"),
         "pickup_special_flow_requires_official_app": ("当前确认页包含未适配的取餐要求或活动。", "在官方 App 处理车牌、特殊活动及整单优惠；不要删除字段后重试。"),
-        "pickup_preparation_unresolved_review_cart": ("本账号有尚未核对的加购或取餐报价准备。", "用对应 status 工具查询原操作，不换键重发。决定重新选餐时，先核对原 request 的购物车并明确清空，再开始新意图；清空不取消已发送的请求。"),
+        "pickup_preparation_unresolved_review_cart": ("本账号有尚未核对的加购或取餐报价准备。", "用对应 status 工具或 cart_operations_list 找回原操作，不换键重发。取餐时间未过时核对原购物车并明确清空；已过时且用户放弃这顿餐，可用 cart_operation_retire 结束本地意图，再查看新餐的当前购物车。订单和付款记录始终保留。"),
         "pickup_key_reused_for_different_request": ("原取餐报价键绑定了不同请求或购物车引用。", "使用原请求，或用 checkout_quote_pickup_status 找回原准备，不更改原键的含义。"),
         "pickup_quote_reference_already_used": ("这个购物车引用已用于一次取餐报价准备。", "先查询原准备；新的报价意图需重新查看购物车，不把新键作为失败重试。"),
         "pickup_quote_response_missing_query_only": ("切换请求已尝试，但没有可核验的回执。", "只查询原准备；初始确认页的默认选项不能证明切换成功。不重发，核对购物车后决定是否重新选餐。"),

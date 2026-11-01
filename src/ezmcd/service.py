@@ -209,6 +209,14 @@ class Service:
         from .cart import CartAdditions
         return CartAdditions(self).status(alias, operation_id)
 
+    def cart_operations(self, alias, *, unresolved_only=True, limit=20, offset=0):
+        from .cart_recovery import CartRecovery
+        return CartRecovery(self.store).list(alias, unresolved_only=unresolved_only, limit=limit, offset=offset)
+
+    def retire_cart_operation(self, alias, operation_id):
+        from .cart_recovery import CartRecovery
+        return CartRecovery(self.store).retire(alias, operation_id)
+
     def submit(self, alias, quote_id, request_key):
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_key):
             raise EzMcdError("invalid_idempotency_key")

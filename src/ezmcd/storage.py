@@ -245,6 +245,34 @@ class Store:
         with self.connect() as conn:
             return conn.execute("SELECT id FROM cart_additions WHERE identity=? AND closed=0 LIMIT 1", (identity,)).fetchone() is not None
 
+    def cart_operations(self, identity, unresolved_only, limit, offset):
+        query = ("SELECT 'addition' AS kind,id,created,closed,data FROM cart_additions WHERE identity=? "
+                 "UNION ALL SELECT 'pickup_quote' AS kind,id,created,closed,data FROM pickup_quotes WHERE identity=?")
+        where = " WHERE closed=0" if unresolved_only else ""
+        with self.connect() as conn:
+            total = conn.execute("SELECT count(*) FROM (" + query + ")" + where, (identity, identity)).fetchone()[0]
+            rows = conn.execute("SELECT * FROM (" + query + ")" + where + " ORDER BY created DESC,id DESC LIMIT ? OFFSET ?",
+                                (identity, identity, limit, offset)).fetchall()
+        return [{"kind": row["kind"], "closed": bool(row["closed"]), "record": json.loads(row["data"])} for row in rows], total
+
+    def cart_operation(self, identity, operation_id):
+        # Fixed tables only. Financial attempts and clear operations are never
+        # eligible for retirement, including those with a missing response.
+        for kind, table in (("addition", "cart_additions"), ("pickup_quote", "pickup_quotes")):
+            with self.connect() as conn:
+                row = conn.execute("SELECT closed,data FROM " + table + " WHERE identity=? AND id=?", (identity, operation_id)).fetchone()
+            if row:
+                return {"kind": kind, "closed": bool(row["closed"]), "record": json.loads(row["data"])}
+        return None
+
+    def retire_cart_operation(self, identity, kind, record):
+        table = {"addition": "cart_additions", "pickup_quote": "pickup_quotes"}[kind]
+        with self.connect() as conn:
+            changed = conn.execute("UPDATE " + table + " SET closed=1,data=? WHERE identity=? AND id=? AND closed=0",
+                                   (canonical(record), identity, record["operation_id"]))
+            if changed.rowcount != 1:
+                raise EzMcdError("cart_operation_already_resolved")
+
     def write_claimed(self, operation_id, stage):
         with self.connect() as conn:
             return conn.execute("SELECT 1 FROM writes WHERE attempt=? AND stage=?", (operation_id, stage)).fetchone() is not None
