@@ -23,8 +23,15 @@ def quote_summary(q):
 
 
 def attempt_summary(a):
+    paid = a.get("state") == "PAID" and a.get("paid_verified")
+    pickup_pending = bool(paid and not a.get("pickup_code"))
+    next_action = ("query_order_status" if a.get("status_query_failed") else
+                   "review_cancelled_order" if a.get("state") == "CANCELLED" else
+                   "query_pickup_code_later" if pickup_pending else "collect_at_pickup_time" if paid else
+                   "query_order_status" if a.get("order_id") else "review_in_official_app")
     return {k: a.get(k) for k in ("attempt_id", "state", "order_id", "pickup_code", "pickup_at", "store_code", "paid_verified", "stop_reason", "simulation", "status_query_failed")} | {
         "amount_cny": yuan(a["amount_cents"]), "automatic_write_retry": False,
+        "pickup_code_pending": pickup_pending, "next_action": next_action,
         "wallet_balance_cny": yuan(a["wallet_after_cents"]) if "wallet_after_cents" in a else None}
 
 
@@ -39,8 +46,11 @@ class Service:
         account = self.store.account(alias)
         if account.get("revoked"):
             raise EzMcdError("account_revoked_reconnect_locally")
-        if account.get("session_refresh", {}).get("state") in ("CLAIMED", "CANDIDATE", "STOPPED"):
-            raise EzMcdError("session_refresh_incomplete_resume_refresh_or_login_locally")
+        refresh_state = account.get("session_refresh", {}).get("state")
+        if refresh_state == "CANDIDATE":
+            raise EzMcdError("session_refresh_received_resume_verification")
+        if refresh_state in ("CLAIMED", "STOPPED"):
+            raise EzMcdError("session_refresh_already_attempted_relogin_locally")
         if account["provider"] == "demo":
             from .demo import DemoProvider
             return account, DemoProvider(account, self.store)
@@ -186,7 +196,16 @@ class Service:
         payload = result["response"]
         if result["http_status"] != 200 or str(payload.get("code")) != "0":
             attempt["stop_reason"] = "payment_requires_official_app_or_status_query"
-        return self._status(account, provider, attempt)
+            return self._status(account, provider, attempt)
+        # A successful consume can precede the order/cashier's settled view.
+        # Only query the existing order, with bounded delays; never resend money.
+        result = self._status(account, provider, attempt)
+        for delay in (1, 2, 4):
+            if result["state"] != "UNKNOWN" or result["status_query_failed"]:
+                break
+            time.sleep(delay)
+            result = self._status(account, provider, attempt)
+        return result
 
     def status(self, alias, attempt_id):
         account, provider = self.provider(alias)

@@ -112,6 +112,90 @@ class ProjectCheckoutTests(unittest.TestCase):
         self.assertFalse(result["paid_verified"])
         self.assertEqual(result["wallet_balance_cny"], "100.00")
 
+    def test_delayed_settlement_queries_until_paid_without_repeating_writes(self):
+        q = self.quote()
+        original = DemoProvider.status
+        calls = []
+        def delayed(provider, attempt):
+            state = original(provider, attempt)
+            calls.append(attempt["order_id"])
+            if len(calls) < 3:
+                state["cashier"]["payStatus"] = "PROCESSING"
+            state["order"]["pickupCode"] = ""
+            return state
+        with patch.object(DemoProvider, "status", delayed), patch("ezmcd.service.time.sleep") as sleep:
+            result = self.service.submit("demo", q["quote_id"], "delayed")
+        self.assertTrue(result["paid_verified"])
+        self.assertTrue(result["pickup_code_pending"])
+        self.assertEqual(result["next_action"], "query_pickup_code_later")
+        self.assertEqual([c.args[0] for c in sleep.call_args_list], [1, 2])
+        self.assertEqual(calls, [result["order_id"]] * 3)
+        with self.store.connect() as conn:
+            self.assertEqual(dict(conn.execute("SELECT stage,count(*) FROM writes GROUP BY stage")),
+                             {"order": 1, "preorder": 1, "consume": 1})
+
+    def test_pending_settlement_is_bounded_and_repeat_only_queries_original_order(self):
+        q = self.quote()
+        original = DemoProvider.status
+        def pending(provider, attempt):
+            state = original(provider, attempt)
+            state["cashier"]["payStatus"] = "PROCESSING"
+            return state
+        with patch.object(DemoProvider, "status", autospec=True, side_effect=pending) as status, \
+                patch("ezmcd.service.time.sleep") as sleep:
+            result = self.service.submit("demo", q["quote_id"], "pending")
+            self.assertEqual(status.call_count, 4)
+            self.assertEqual([c.args[0] for c in sleep.call_args_list], [1, 2, 4])
+            self.assertEqual(result["state"], "UNKNOWN")
+            self.assertEqual(result["next_action"], "query_order_status")
+            self.assertFalse(result["paid_verified"])
+            self.assertFalse(result["automatic_write_retry"])
+            self.service.set_policy("demo", Policy())
+            repeated = Service(self.store).submit("demo", q["quote_id"], "pending")
+            self.assertEqual(status.call_count, 5)
+            self.assertEqual(sleep.call_count, 3)
+            self.assertEqual(repeated["attempt_id"], result["attempt_id"])
+        with self.store.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM writes").fetchone()[0], 3)
+        self.assertEqual(self.service.check_account("demo")["wallet_balance_cny"], "90.00")
+
+    def test_failed_status_query_stops_waiting_without_another_consume(self):
+        q = self.quote()
+        with patch.object(DemoProvider, "status", side_effect=EzMcdError("synthetic_timeout")) as status, \
+                patch("ezmcd.service.time.sleep") as sleep:
+            result = self.service.submit("demo", q["quote_id"], "query-failure")
+            status.assert_called_once()
+            sleep.assert_not_called()
+        self.assertTrue(result["status_query_failed"])
+        self.assertEqual(result["next_action"], "query_order_status")
+        self.assertFalse(result["paid_verified"])
+        self.assertTrue(self.service.status("demo", result["attempt_id"])["paid_verified"])
+        with self.store.connect() as conn:
+            self.assertEqual(conn.execute("SELECT count(*) FROM writes").fetchone()[0], 3)
+
+    def test_rejected_consume_does_not_start_settlement_wait(self):
+        q = self.quote()
+        with patch.object(DemoProvider, "consume", return_value={"http_status": 200, "response": {"code": "420"}}) as consume, \
+                patch("ezmcd.service.time.sleep") as sleep:
+            result = self.service.submit("demo", q["quote_id"], "rejected")
+            consume.assert_called_once()
+            sleep.assert_not_called()
+        self.assertEqual(result["stop_reason"], "payment_requires_official_app_or_status_query")
+        self.assertFalse(result["paid_verified"])
+        self.assertEqual(result["next_action"], "query_order_status")
+
+    def test_settlement_wait_never_waives_wallet_amount_check(self):
+        q = self.quote()
+        original = DemoProvider.status
+        def wrong_balance(provider, attempt):
+            state = original(provider, attempt)
+            state["wallet_cents"] += 1
+            return state
+        with patch.object(DemoProvider, "status", wrong_balance), patch("ezmcd.service.time.sleep"):
+            result = self.service.submit("demo", q["quote_id"], "balance-mismatch")
+        self.assertEqual(result["state"], "UNKNOWN")
+        self.assertFalse(result["paid_verified"])
+
     def test_disabled_revoked_expired_and_store_restricted_policy(self):
         q = self.quote()
         policies = [Policy(), Policy(allow_checkout=True, allowed_stores=["9000002"]),
@@ -163,6 +247,7 @@ class ProjectCheckoutTests(unittest.TestCase):
             result = self.service.status("demo", result["attempt_id"])
         self.assertEqual(result["state"], "CANCELLED")
         self.assertFalse(result["paid_verified"])
+        self.assertEqual(result["next_action"], "review_cancelled_order")
 
     def test_exclusive_account_lock(self):
         identity = self.store.account("demo")["identity"]

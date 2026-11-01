@@ -272,6 +272,13 @@ def public_account(record, *, session_verified=False):
     demo = record["provider"] == "demo"
     revoked = bool(record.get("revoked"))
     fields = record.get("profile", {}).get("fields", {})
+    refresh_state = record.get("session_refresh", {}).get("state", "NOT_ATTEMPTED")
+    refresh_incomplete = refresh_state in ("CLAIMED", "CANDIDATE", "STOPPED")
+    recovery = ("resume_refresh_verification" if refresh_state == "CANDIDATE"
+                else "relogin_or_reconnect_locally" if refresh_incomplete else None)
+    session_status = ("revoked_locally" if revoked else "refresh_verification_pending" if refresh_state == "CANDIDATE"
+                      else "refresh_stopped_relogin_locally" if refresh_incomplete
+                      else "verified_now" if session_verified else "connected_verify_with_account_check")
     runtime_available = bool(not revoked and runtime and 0 <= time.time() - runtime["observed_at"] <= 86400)
     blockers = []
     if revoked:
@@ -280,8 +287,7 @@ def public_account(record, *, session_verified=False):
         blockers.append("session_not_checked")
     if not demo and not runtime_available:
         blockers.append("runtime_missing_or_stale")
-    refresh_state = record.get("session_refresh", {}).get("state", "NOT_ATTEMPTED")
-    if refresh_state in ("CLAIMED", "CANDIDATE", "STOPPED"):
+    if refresh_incomplete:
         blockers.append("session_refresh_incomplete")
     if not record["policy"]["allow_checkout"]:
         blockers.append("checkout_disabled")
@@ -290,17 +296,18 @@ def public_account(record, *, session_verified=False):
         blockers.append("checkout_policy_expired")
     return {"account": record["alias"], "provider": record["provider"],
         "phone_label": record.get("phone_label"), "auth_method": "offline_demo" if record["provider"] == "demo" else record.get("auth_method", "official_session_import"),
-        "session_status": "revoked_locally" if revoked else "verified_now" if session_verified else "connected_verify_with_account_check",
+        "session_status": session_status,
         "sms_login_supported": record["provider"] == "mcd-cn", "sms_login_requires_official_device_context": True,
         "runtime_available": runtime_available,
         "runtime_evidence": {"maximum_observation_age_hours": 24,
             "age_hours": round((time.time() - runtime["observed_at"]) / 3600, 2) if runtime and not revoked else None,
             "verification_scope": ("v5_order_list_get" if runtime.get("source") == "same_official_device_readonly_verified"
                                    else "official_request_reconstruction") if runtime and not revoked else None},
-        "session_refresh_supported": bool(not revoked and fields.get("refreshToken")),
+        "session_refresh_supported": bool(not revoked and fields.get("refreshToken") and refresh_state not in ("CLAIMED", "STOPPED")),
         "session_refresh_state": refresh_state,
+        "session_recovery": None if revoked else recovery,
         "device_context_available": bool(not revoked and fields.get("deviceToken") and fields.get("riskDeviceId")),
-        "readiness": {"can_browse": bool(not revoked and (session_verified or demo)),
+        "readiness": {"can_browse": bool(not revoked and not refresh_incomplete and (session_verified or demo)),
                       "checkout_prerequisites_met": not blockers, "checkout_blockers": blockers,
                       "fresh_quote_and_order_checks_still_required": True},
         "policy": record["policy"]}

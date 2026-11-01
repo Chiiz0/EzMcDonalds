@@ -22,7 +22,7 @@ def credentials_guide():
             "运行 ezmcd account check ALIAS；缺少下单运行字段时仍可找店、选餐、准备购物车与报价。",
             "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
             "同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
-            "不要为获取运行样本额外创建订单；长期更新和复用模式的订单 POST 仍待验收。",
+            "不要为获取运行样本额外创建订单；同设备复用已完成一笔真实订单，长期运行字段更新仍待完成。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],
         "account_label_is_not_authentication": True, "automatic_device_initialization": False}
 
@@ -60,7 +60,9 @@ def doctor(service, alias=None, *, verify_session=False, binary="/Applications/M
             except (OSError, ValueError, KeyError, TypeError):
                 view["session_check"] = error_result("invalid_local_configuration_or_response")
         actions = []
-        if view["session_status"] == "expired_relogin_or_refresh":
+        if view.get("session_recovery"):
+            actions.append(view["session_recovery"])
+        elif view["session_status"] == "expired_relogin_or_refresh":
             actions.append("refresh_session_or_relogin_locally")
         if view["client_build"] not in ("supported", "not_required_for_demo"):
             actions.append("install_or_select_supported_official_client_build")

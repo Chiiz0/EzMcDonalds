@@ -56,12 +56,13 @@ def build_server(service):
             "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
             "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
             "coupon_configuration": "fresh references scoped to account/store/time; ordinary single-product coupons can be drafted and their cart echo must match; new coupon writes/payments not yet accepted",
-            "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; reused-context order POST and cross-day validity not yet accepted",
+            "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; one reused-context order POST/payment accepted, cross-day validity unverified",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
             "local_request_import": "CLI only: copy one signed balance request as cURL/raw HTTP, then connect --clipboard on Mac or --request-file; validates signature and live balance, never executes copied commands; runtime supports the same text sources and discards the order body",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
             "runtime_ttl_source": "local_adapter_limit_not_verified_server_expiry",
-            "real_e2e_evidence": "one authorized account/store/breakfast combo; generalized purchase paths need acceptance",
+            "real_e2e_evidence": "public core through stdio MCP: one SMS-authorized account, one store, breakfast-card combo, CNY12.60 McWallet payment; duplicate after restart returned the same paid order without new writes; other meal/store scenarios unverified",
+            "payment_settlement": "successful consume followed by at most four read-only status checks, with 1/2/4 second delays; UNKNOWN is query-only, never a reason to repeat payment",
             "automatic_retries": False, "automatic_schedule": False}
 
     @server.tool(annotations=READ)

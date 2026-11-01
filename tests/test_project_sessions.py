@@ -88,7 +88,7 @@ class SessionTests(unittest.TestCase):
             self.refresh()
         self.assertEqual(self.transport.send.call_count, 1)
         self.provider.wallet.assert_not_called()
-        with self.assertRaisesRegex(EzMcdError, "session_refresh_incomplete"):
+        with self.assertRaisesRegex(EzMcdError, "already_attempted_relogin"):
             Service(self.store, self.provider_factory).provider("test")
 
     def test_process_interrupt_keeps_claim_and_does_not_resend(self):
@@ -198,6 +198,44 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(open_request.call_args.args[1], API + REFRESH)
         self.assertEqual(transport.signer.headers.call_args.args[4], ("1006", "500"))
         self.assertFalse(transport.signer.headers.call_args.kwargs["v5"])
+
+    def test_stopped_refresh_never_reports_connected_or_refreshable(self):
+        for state in ("CLAIMED", "STOPPED"):
+            with self.subTest(state=state):
+                self.record["session_refresh"] = {"state": state}
+                result = public_account(self.record, session_verified=True)
+                self.assertEqual(result["session_status"], "refresh_stopped_relogin_locally")
+                self.assertEqual(result["session_recovery"], "relogin_or_reconnect_locally")
+                self.assertFalse(result["session_refresh_supported"])
+                self.assertFalse(result["readiness"]["can_browse"])
+                self.assertIn("session_refresh_incomplete", result["readiness"]["checkout_blockers"])
+                self.assertNotIn("synthetic-", json.dumps(result))
+
+    def test_candidate_refresh_reports_only_resume_verification(self):
+        self.provider.wallet.side_effect = EzMcdError("synthetic_timeout")
+        with self.assertRaises(EzMcdError):
+            self.refresh()
+        result = public_account(self.store.account("test"), session_verified=True)
+        self.assertEqual(result["session_status"], "refresh_verification_pending")
+        self.assertEqual(result["session_recovery"], "resume_refresh_verification")
+        self.assertTrue(result["session_refresh_supported"])
+        self.assertFalse(result["readiness"]["can_browse"])
+        with self.assertRaisesRegex(EzMcdError, "received_resume_verification"):
+            Service(self.store, self.provider_factory).check_account("test")
+        self.assertEqual(self.provider.wallet.call_count, 1)
+        self.assertEqual(self.transport.send.call_count, 1)
+
+    def test_rejected_refresh_persists_stop_and_does_not_retry(self):
+        self.transport.send.return_value = {"http_status": 200, "response": {"code": 401}}
+        with self.assertRaisesRegex(EzMcdError, "session_refresh_rejected_401"):
+            self.refresh()
+        result = public_account(self.store.account("test"))
+        self.assertEqual(result["session_refresh_state"], "STOPPED")
+        self.assertFalse(result["session_refresh_supported"])
+        with self.assertRaisesRegex(EzMcdError, "already_attempted"):
+            self.refresh()
+        self.transport.send.assert_called_once()
+        self.provider.wallet.assert_not_called()
 
 
 if __name__ == "__main__":

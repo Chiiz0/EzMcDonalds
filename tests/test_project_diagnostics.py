@@ -47,6 +47,27 @@ class DiagnosticTests(unittest.TestCase):
         with self.assertRaisesRegex(EzMcdError, "upstream_rejected"):
             data({"http_status": 200, "response": {"success": False, "code": 123}})
 
+    def test_incomplete_refresh_diagnosis_gives_specific_recovery_without_network(self):
+        for state, action, code in (
+                ("CANDIDATE", "resume_refresh_verification", "session_refresh_received_resume_verification"),
+                ("CLAIMED", "relogin_or_reconnect_locally", "session_refresh_already_attempted_relogin_locally"),
+                ("STOPPED", "relogin_or_reconnect_locally", "session_refresh_already_attempted_relogin_locally")):
+            with self.subTest(state=state):
+                self.record["session_refresh"] = {"state": state}
+                self.store.update_account(self.record)
+                result = doctor(self.service, "test", verify_session=True, binary="absent-client")["accounts"][0]
+                self.assertEqual(result["next_actions"][0], action)
+                self.assertEqual(result["session_check"]["error"], code)
+                self.assertFalse(result["readiness"]["can_browse"])
+                self.assertNotIn("private-", json.dumps(result))
+        self.provider.wallet.assert_not_called()
+
+    def test_refresh_401_help_does_not_advise_repeating_rotation(self):
+        result = error_result("session_refresh_rejected_401")
+        self.assertIn("--update", result["next_action"])
+        self.assertIn("不重复刷新", result["next_action"])
+        self.assertFalse(result["automatic_write_retry"])
+
     def test_empty_install_has_concrete_local_setup_steps(self):
         empty = Store(self.store.root / "empty")
         result = doctor(Service(empty), binary="absent-client")

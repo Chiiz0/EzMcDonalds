@@ -88,6 +88,8 @@
 
 `PAID`要求订单、收银台及预期钱包差额一致。`UNKNOWN`不是付款失败，只查询；`CANCELLED`优先于历史收银台`PAID`。取消后本地额度和去重不自动解除。密码/安全验证交由官方入口。
 
+消费接口成功后，最多核对四次同一订单，中间等待1、2、4秒；一旦成功、取消或查询失败即停止等待。等待只查询订单、收银台和余额，不重发订单、预支付或消费。结果给出 `next_action`：`query_order_status` 继续查原订单；`query_pickup_code_later` 表示付款已核验但取餐码待生成；`review_in_official_app` 用于缺少订单回执、无法关联的情况。手动 `order_status` 每次只核对一次。
+
 下单回执丢失时`order_id`可能为空，保留`attempt_id`，通过官方订单列表人工核对，当前版本不自动猜测关联。`pickup_code=null`表示尚未生成。
 
 `simulation=true`始终表示离线演示，演示店号和取餐号不能实际使用。

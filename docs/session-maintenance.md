@@ -21,13 +21,16 @@ ezmcd account refresh personal
 
 单次真实联调已通过刷新、余额核验及保存；再次调用确认没有重复刷新。跨日连续运行与服务端过期后的恢复尚待验收。
 
+另一个旧会话真实刷新被官方拒绝后，项目保留 `STOPPED` 状态。`doctor` 会提示本机重新登录，不能通过反复刷新恢复该旧令牌。若账号仍有本人官方设备字段，可运行 `ezmcd account login personal --device-from personal`，在本机输入原会员的手机号和验证码；或用 `account connect personal --clipboard --update` 重新导入本人官方会话。两种方式均保留原会员的购买日志。
+
 ## 给 Agent 的状态
 
 `accounts_list` / `account_check` 分别报告：
 
 - `device_context_available`：本地是否有设备字段，不能当作服务端仍接受这些字段的证明。
-- `session_refresh_supported`：本地是否持有可尝试刷新的令牌，不保证服务器接受。
+- `session_refresh_supported`：可尝试刷新或继续核验的本地令牌；`CLAIMED` / `STOPPED` 返回 `false`，不保证服务器接受。
 - `session_refresh_state`：未尝试、执行中、待核验、已完成或已停止。
+- `session_status` / `session_recovery`：待核验提示 `resume_refresh_verification`，通过 `account_refresh` 继续只读核验；已中断或停止提示 `relogin_or_reconnect_locally`。这两种状态的 `can_browse` 均为 `false`。
 - `readiness.can_browse`：本次核验通过后可尝试浏览，离线演示单独处理。
 - `readiness.checkout_blockers`：尚未核验会话、运行字段缺失或过期、消费未授权、策略过期、刷新未完成等。
 
