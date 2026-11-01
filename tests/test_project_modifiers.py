@@ -125,6 +125,44 @@ class ModifierTests(unittest.TestCase):
             selected_modification(iced_coffee(), [ModifierSelection(code="222", quantity=1, key="1-1"),
                                                 ModifierSelection(code="333", quantity=1, key="0-0")])
 
+    def test_single_choice_legacy_item_echo_is_checked_by_code_and_key(self):
+        expected = selected_modification(iced_coffee(), [ModifierSelection(code="222", quantity=1, key="1-1")])
+        actual = {"customization": {"options": [], "items": [{"code": "222", "name": "冰", "key": "1-1",
+            "displayText": "冰(少冰)", "values": [{"code": "4", "name": "少冰", "price": 0, "quantity": 1}]}]}}
+        verify_modification(expected, actual)
+        verify_modification(expected, expected | actual)
+        for change in ("wrong_key", "wrong_code", "paid", "two_choices", "unselected", "duplicate", "conflicting_modern"):
+            wrong = deepcopy(actual)
+            item = wrong["customization"]["items"][0]
+            if change == "wrong_key": item["key"] = "0-1"
+            if change == "wrong_code": item["code"] = "999"
+            if change == "paid": item["values"][0]["price"] = 100
+            if change == "two_choices": item["values"].append(deepcopy(item["values"][0]))
+            if change == "unselected": item["values"][0]["quantity"] = 0
+            if change == "duplicate": wrong["customization"]["options"] = [{"code": "222", "key": "1-1"}]
+            if change == "conflicting_modern": wrong.update(selected_modification(iced_coffee()))
+            with self.subTest(change=change), self.assertRaisesRegex(EzMcdError, "not_confirmed"):
+                verify_modification(expected, wrong)
+
+    def test_legacy_toggles_and_single_choice_items_are_verified_together(self):
+        p = iced_coffee()
+        p["modification"]["items"].extend(coffee()["modification"]["items"])
+        expected = selected_modification(p)
+        actual = {"customization": {"options": deepcopy(expected["modification"]["values"][1:]), "items": [
+            {"code": "222", "key": "0-1", "values": [{"code": "1", "price": 0, "quantity": 1}]}]}}
+        verify_modification(expected, actual)
+        actual["customization"]["options"].pop()
+        with self.assertRaisesRegex(EzMcdError, "not_confirmed"):
+            verify_modification(expected, actual)
+
+    def test_modern_echo_requires_selected_outer_quantity(self):
+        expected = selected_modification(iced_coffee())
+        for quantity in (0, 2, True, "1", None):
+            wrong = deepcopy(expected)
+            wrong["modification"]["values"][0]["quantity"] = quantity
+            with self.subTest(quantity=quantity), self.assertRaisesRegex(EzMcdError, "not_confirmed"):
+                verify_modification(expected, wrong)
+
     def test_single_choice_rejects_paid_sold_out_unknown_duplicate_or_zero_selections(self):
         for values in ([{"code": "222", "quantity": 1}], [{"code": "222", "quantity": 0, "key": "0-0"}],
                        [{"code": "222", "quantity": 1, "key": "9-9"}],

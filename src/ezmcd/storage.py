@@ -80,6 +80,9 @@ class Store:
             CREATE TABLE IF NOT EXISTS request_keys(identity TEXT NOT NULL, request_key TEXT NOT NULL,
                 intent TEXT NOT NULL, attempt TEXT NOT NULL, PRIMARY KEY(identity, request_key));
             INSERT OR IGNORE INTO request_keys SELECT identity, request_key, intent, id FROM attempts;
+            CREATE TABLE IF NOT EXISTS cart_snapshots(id TEXT PRIMARY KEY, identity TEXT NOT NULL,
+                scope TEXT NOT NULL, digest TEXT NOT NULL, expires REAL NOT NULL,
+                clear_key TEXT, confirmed INTEGER NOT NULL DEFAULT 0, UNIQUE(identity, clear_key));
             """)
 
     @contextmanager
@@ -148,6 +151,38 @@ class Store:
     def save_quote(self, identity, data):
         with self.connect() as conn:
             conn.execute("INSERT INTO quotes VALUES (?,?,?)", (data["quote_id"], identity, canonical(data)))
+
+    def save_cart_snapshot(self, identity, ref, scope, digest, expires):
+        with self.connect() as conn:
+            conn.execute("INSERT INTO cart_snapshots(id,identity,scope,digest,expires) VALUES (?,?,?,?,?)",
+                         (ref, identity, canonical(scope), digest, expires))
+
+    def cart_snapshot(self, identity, ref):
+        with self.connect() as conn:
+            row = conn.execute("SELECT * FROM cart_snapshots WHERE id=? AND identity=?", (ref, identity)).fetchone()
+        if not row:
+            raise EzMcdError("cart_snapshot_not_found_for_account")
+        return dict(row) | {"scope": json.loads(row["scope"])}
+
+    def claim_cart_clear(self, identity, ref, key, *, will_write):
+        # One transaction binds both the one-use snapshot and the stable key
+        # before any network mutation. A crash cannot free either for a retry.
+        with self.connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                changed = conn.execute("UPDATE cart_snapshots SET clear_key=? WHERE id=? AND identity=? "
+                                       "AND clear_key IS NULL AND expires>?", (key, ref, identity, time.time()))
+                if changed.rowcount != 1:
+                    raise EzMcdError("cart_snapshot_expired_or_already_used")
+                if will_write:
+                    conn.execute("INSERT INTO writes VALUES (?,?,?,NULL)", (ref, "cart_clear", time.time()))
+            except sqlite3.IntegrityError:
+                raise EzMcdError("cart_clear_key_already_used") from None
+
+    def confirm_cart_clear(self, identity, ref):
+        with self.connect() as conn:
+            conn.execute("UPDATE cart_snapshots SET confirmed=1 WHERE id=? AND identity=? AND clear_key IS NOT NULL",
+                         (ref, identity))
 
     def quote(self, identity, quote_id):
         with self.connect() as conn:

@@ -111,18 +111,38 @@ def verify_modification(expected, actual):
     """Stop if a server cart omitted/changed an explicitly submitted ingredient.
 
     Modern carts may echo modification.values or normalize them to legacy
-    customization.options. Compare their code/key pairs, never the display text.
+    customization.options/items. Compare their code/key pairs, never display text.
     """
     wanted = expected.get("modification", {}).get("values")
     if wanted is None:
         return
     try:
-        received = (actual.get("modification") or {}).get("values")
-        if received is None:
-            received = (actual.get("customization") or {}).get("options", [])
         target = {v["code"]: v["key"] for v in wanted}
-        got = {v["code"]: v["key"] for v in received}
-        if len(got) != len(received) or target != got:
+        representations = []
+        modern = (actual.get("modification") or {}).get("values")
+        if modern is not None:
+            if not isinstance(modern, list) or any(type(v.get("quantity")) is not int or v["quantity"] != 1 for v in modern):
+                raise ValueError
+            representations.append(modern)
+        legacy = actual.get("customization") or {}
+        options, items = legacy.get("options", []), legacy.get("items", [])
+        if not isinstance(options, list) or not isinstance(items, list):
             raise ValueError
+        # Observed single-choice cart echo: group code/key identifies the choice;
+        # one free selected value is nested inside the group, e.g. less ice.
+        for item in items:
+            values = item["values"]
+            if (not isinstance(values, list) or len(values) != 1
+                    or type(values[0].get("quantity")) is not int or values[0]["quantity"] != 1
+                    or type(values[0].get("price")) is not int or values[0]["price"] != 0):
+                raise ValueError
+        if options or items:
+            representations.append(options + items)
+        if not representations:
+            raise ValueError
+        for received in representations:
+            got = {v["code"]: v["key"] for v in received}
+            if len(got) != len(received) or target != got:
+                raise ValueError
     except (AttributeError, TypeError, ValueError, KeyError):
         raise EzMcdError("cart_modifier_selection_not_confirmed_review_cart") from None

@@ -27,6 +27,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("checkout_submit", names)
                 self.assertIn("product_detail", names)
                 self.assertIn("cart_add_configured", names)
+                self.assertTrue(next(t for t in tools if t.name == "cart_clear").annotations.destructive_hint)
                 self.assertIn("account_refresh", names)
                 self.assertIn("account_runtime_check", names)
                 history = next(t for t in tools if t.name == "orders_list")
@@ -75,9 +76,16 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(coupons["coupons"], [])
                 detail = json.loads((await client.call_tool("product_detail", {"request": request, "product_code": "100001"})).content[0].text)
                 self.assertTrue(detail["simulation"])
+                viewed = json.loads((await client.call_tool("cart_get", {"request": request})).content[0].text)
+                clear_args = {"request": request, "cart_ref": viewed["cart_ref"], "idempotency_key": "mcp-clear"}
+                cleared = json.loads((await client.call_tool("cart_clear", clear_args)).content[0].text)
+                self.assertTrue(cleared["cart_empty"])
                 added = json.loads((await client.call_tool("cart_add_configured", {"request": request,
                     "items": [{"product_code": "100001", "quantity": 1}], "idempotency_key": "mcp-cart"})).content[0].text)
                 self.assertFalse(added["order_created"])
+                repeated_clear = json.loads((await client.call_tool("cart_clear", clear_args)).content[0].text)
+                self.assertFalse(repeated_clear["cart_empty"])
+                self.assertFalse(repeated_clear["clear_attempted"])
                 result = await client.call_tool("checkout_quote", {"request": request})
                 q = json.loads(result.content[0].text)
                 self.assertTrue(q["simulation"])
@@ -101,7 +109,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(recovered["paid_verified"])
                 self.assertEqual(recovered["order_id"], first["order_id"])
             with store.connect() as db:
-                self.assertEqual(db.execute("SELECT count(*) FROM writes").fetchone()[0], 4)  # one cart + three checkout stages
+                self.assertEqual(db.execute("SELECT count(*) FROM writes").fetchone()[0], 5)  # clear, add, three checkout stages
 
     async def test_account_errors_do_not_expose_secrets_or_paths(self):
         with tempfile.TemporaryDirectory() as temporary:

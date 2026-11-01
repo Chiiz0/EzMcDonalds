@@ -8,6 +8,13 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "cart_not_empty_review_before_clear": ("购物车已有餐品。", "先用 cart_get 查看；可直接报价，或在用户确实要改餐时携带其 cart_ref 调用 cart_clear，再重新加购。"),
+        "cart_changed_review_before_clear": ("购物车内容或金额已变化，本次没有清空。", "重新 cart_get，让用户核对当前餐品；不要自动用新引用重复清空。"),
+        "cart_snapshot_expired_or_already_used": ("购物车引用已过期或已用于清空。", "原请求用相同引用和幂等键只能查询；新改餐意图先 cart_get 重新查看。"),
+        "cart_snapshot_scope_changed": ("购物车引用对应另一门店或取餐时段。", "使用原门店与取餐时间，或重新 cart_get 查看当前购物车。"),
+        "cart_snapshot_not_found_for_account": ("本账号没有这个购物车引用。", "用相同数据目录和账号调用 cart_get，不共用其他账号的引用。"),
+        "cart_clear_key_already_used": ("这个清空幂等键已经绑定另一份购物车。", "查询原操作；只有新的改餐意图才使用新的键与购物车引用。"),
+        "cart_clear_not_confirmed_query_only": ("尚未确认购物车已清空。", "先 cart_get 查看当前内容；不要自动重发清空请求或继续加购。"),
         "sampling_options_invalid": ("采样参数不正确。", "使用实际 macOS 网络服务名称；采样时长为30至120秒。"),
         "sampling_cancelled_before_start": ("已在正式采样前取消。", "系统代理未启用；可以保持官方 App 关闭或正常使用。"),
         "sampling_mitmproxy_required": ("未找到可执行的 mitmdump。", "使用 Python 3.12+ 安装项目的 sampling 额外依赖；或用 --mitmdump 指向本机已安装的程序。"),

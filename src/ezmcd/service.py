@@ -131,6 +131,60 @@ class Service:
     def add_simple_items(self, args, items, request_key):
         return self._add_items(args, items, request_key, configured=False)
 
+    @staticmethod
+    def _cart_scope(args):
+        return {"store_code": args.store_code, "pickup_at": args.pickup_at, "eat_type": args.eat_type}
+
+    def _cart_snapshot(self, account, provider, args):
+        cart, _, digest = provider.cart_state(args)
+        ref, expires = "cart-" + uuid.uuid4().hex, time.time() + 120
+        self.store.save_cart_snapshot(account["identity"], ref, self._cart_scope(args), digest, expires)
+        return cart | {"cart_ref": ref, "cart_ref_expires_at": expires,
+                       "order_created": False, "payment_attempted": False}
+
+    def cart(self, args):
+        account, provider = self.provider(args.account)
+        with self.store.lock(account["identity"]):
+            return self._cart_snapshot(account, provider, args)
+
+    def clear_cart(self, args, cart_ref, request_key):
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", request_key):
+            raise EzMcdError("invalid_idempotency_key")
+        if not re.fullmatch(r"cart-[0-9a-f]{32}", cart_ref):
+            raise EzMcdError("invalid_cart_snapshot_reference")
+        account, provider = self.provider(args.account)
+        identity = account["identity"]
+        with self.store.lock(identity):
+            snapshot = self.store.cart_snapshot(identity, cart_ref)
+            if snapshot["scope"] != self._cart_scope(args):
+                raise EzMcdError("cart_snapshot_scope_changed")
+            if snapshot["clear_key"] is not None:
+                if snapshot["clear_key"] != request_key:
+                    raise EzMcdError("cart_snapshot_expired_or_already_used")
+                # Even after restart, a repeated call only reads today's cart.
+                # It must never clear items added since the original operation.
+                cart = self._cart_snapshot(account, provider, args)
+                return cart | {"cart_empty": not cart["items"], "clear_attempted": False,
+                    "repeated": True, "original_clear_verified": bool(snapshot["confirmed"]),
+                    "automatic_write_retry": False}
+            if time.time() >= snapshot["expires"]:
+                raise EzMcdError("cart_snapshot_expired_or_already_used")
+            cart, body, digest = provider.cart_state(args)
+            if digest != snapshot["digest"]:
+                raise EzMcdError("cart_changed_review_before_clear")
+            will_write = bool(cart["items"])
+            self.store.claim_cart_clear(identity, cart_ref, request_key, will_write=will_write)
+            if will_write:
+                result = provider.clear_cart(body)
+                self.store.receipt(cart_ref, "cart_clear", result)
+                data(result)
+            current = self._cart_snapshot(account, provider, args)
+            if current["items"]:
+                raise EzMcdError("cart_clear_not_confirmed_query_only")
+            self.store.confirm_cart_clear(identity, cart_ref)
+            return current | {"cart_empty": True, "clear_attempted": will_write,
+                "repeated": False, "original_clear_verified": True, "automatic_write_retry": False}
+
     def add_configured_items(self, args, items, request_key):
         return self._add_items(args, items, request_key, configured=True)
 
@@ -145,7 +199,7 @@ class Service:
             result = provider.write_cart(draft)
             self.store.receipt(op, "cart", result)
             data(result)
-            cart = provider.cart(args)
+            cart = self._cart_snapshot(account, provider, args)
             if configured:
                 from .products import verify_configured_cart
                 verify_configured_cart(draft, cart)

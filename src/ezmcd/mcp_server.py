@@ -37,6 +37,7 @@ def build_server(service):
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
+        "To change a nonempty cart, inspect cart_get and use its short-lived cart_ref with cart_clear only when the user wants those items removed. "
         "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
         "Use a stable idempotency key per user purchase. "
         "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
@@ -56,7 +57,8 @@ def build_server(service):
             "membership_assets": "card validity and coupon category counts; coupons_list queries current store/time availability and coupon_products lists matching products",
             "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
             "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
-            "coupon_configuration": "fresh references scoped to account/store/time; ordinary single-product coupons can be drafted and their cart echo must match; new coupon writes/payments not yet accepted",
+            "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks; ordinary coupon payment unverified",
+            "cart_changes": "cart_get/cart_add return a 120-second member/store/time-bound reference; explicit cart_clear rechecks the complete cart and sends once; repeats only query; real clear and repeat verified, no cross-client atomic lock",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; one reused-context order POST/payment accepted, cross-day validity unverified",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
             "local_guarded_capture": "Mac CLI sampling-capture only; requires local certificate and manual official App operation; blocks order requests before upstream, restores proxy after App closes; does not import automatically or enable spending; real no-order sampling verified",
@@ -207,9 +209,14 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def cart_get(request: CheckoutInput) -> dict:
-        """Inspect exact products, quantities and combo choices currently selected in the official cart."""
-        _, provider = service.provider(request.account)
-        return provider.cart(request)
+        """Inspect products, quantities and choices in the official cart. Returns a 120-second account/store/time-bound cart_ref for an explicit clear. Does not mutate the official cart."""
+        return service.cart(request)
+
+    @server.tool(annotations=PAY)
+    @protected
+    def cart_clear(request: CheckoutInput, cart_ref: str, idempotency_key: str) -> dict:
+        """Remove ALL items from the inspected cart only when the user wants to change/remove them. Requires a fresh cart_get/cart_add cart_ref and stable key; rechecks the complete cart before one PUT. Repeated calls only query. Never cancels orders, consumes coupons or pays. Do not edit concurrently in the official App."""
+        return service.clear_cart(request, cart_ref, idempotency_key)
 
     @server.tool(annotations=CART)
     @protected

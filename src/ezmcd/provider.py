@@ -5,7 +5,7 @@ import re
 from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items, menu_categories, membership_assets
 from .errors import EzMcdError
 from .discovery import cities, pickup_choices, resolve_city, store_results
-from .models import pickup_time, cents, yuan
+from .models import pickup_time, cents, yuan, fingerprint
 from .protocol.signing import device_update_metadata
 from .products import choose_offer, configured_product, public_detail
 from .coupons import coupon_rows, choose_coupon, coupon_offers, public_coupon, public_coupon_products
@@ -103,9 +103,24 @@ class McdProvider:
                 "categories": menu_categories(raw), "products": public_menu(raw, keyword)}
 
     def cart(self, args):
+        return self.cart_state(args)[0]
+
+    def cart_state(self, args):
         daypart, params = self.context(args)
-        raw = self.get("/bff/cart/carts", params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart})
-        return {"items": cart_items(raw), "store_code": args.store_code, "pickup_at": args.pickup_at}
+        body = params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart}
+        raw = self.get("/bff/cart/carts", body)
+        if (str(raw.get("storeCode")) != args.store_code or raw.get("beType") != 1
+                or raw.get("orderType") != 1 or str(raw.get("daypartCode")) != daypart
+                or not isinstance(raw.get("products"), list)):
+            raise EzMcdError("cart_store_fulfillment_or_daypart_mismatch")
+        # Compare the full server cart, including coupon identity, configuration,
+        # quantities and prices. The server clock is not a cart revision.
+        digest = fingerprint({"request": body, "cart": {k: v for k, v in raw.items() if k != "localDateTime"}})
+        public = {"items": cart_items(raw), "store_code": args.store_code, "pickup_at": args.pickup_at}
+        return public, body, digest
+
+    def clear_cart(self, body):
+        return self.http.send("PUT", "/bff/cart/carts/empty", body=body)
 
     def _detail(self, offer, daypart, params):
         code = str(offer["productCode"])
@@ -145,7 +160,7 @@ class McdProvider:
         if (str(cart.get("storeCode")) != args.store_code or cart.get("beType") != 1 or cart.get("orderType") != 1):
             raise EzMcdError("cart_store_or_fulfillment_mismatch")
         if cart.get("products"):
-            raise EzMcdError("cart_not_empty_use_existing_cart_or_clear_in_official_app")
+            raise EzMcdError("cart_not_empty_review_before_clear")
         menu = None
         used_coupons = set()
         products = []
@@ -180,7 +195,7 @@ class McdProvider:
         daypart, params = self.context(args)
         cart = self.get("/bff/cart/carts", params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart})
         if cart.get("products"):
-            raise EzMcdError("cart_not_empty_use_existing_cart_or_clear_in_official_app")
+            raise EzMcdError("cart_not_empty_review_before_clear")
         menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
         products = []
         for index, selection in enumerate(selections):

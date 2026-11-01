@@ -101,6 +101,39 @@ def cart_items(cart):
              "amount_cents": p["realSubTotalPrice"]} for p in cart.get("products", [])]
 
 
+def verify_confirmation_components(product, rows):
+    """A single item's free choice can appear as a display row, not a combo.
+
+    Only the observed single-choice shape is accepted without productCode.
+    The structured cart selection stays in the quote intent; its confirmation
+    label and quantity must also match. Unknown/mixed shapes stop here.
+    """
+    try:
+        expected = sorted((str(i["code"]), i["quantity"]) for g in product.get("comboItems", []) for i in g.get("comboProducts", []))
+        customization = product.get("customization") or {}
+        if (str(product.get("type")) == "1" and customization.get("items")) or (rows and any("productCode" not in i for i in rows)):
+            items = customization.get("items", [])
+            if (str(product.get("type")) != "1" or expected or not items or customization.get("options")
+                    or product.get("grills") or product.get("biasChoices") or product.get("modification")):
+                raise ValueError
+            # Validate the free selected-value shape as well as the labels.
+            from .modifiers import verify_modification
+            verify_modification({"modification": {"values": [{"code": i["code"], "key": i["key"], "quantity": 1}
+                                                              for i in items]}}, product)
+            expected = sorted((i["displayText"], 1) for i in items)
+            if any(not isinstance(name, str) or not name for name, _ in expected):
+                raise ValueError
+            if any(set(i) != {"name", "quantity"} or type(i["quantity"]) is not int or i["quantity"] != 1 for i in rows):
+                raise ValueError
+            actual = sorted((i["name"], i["quantity"]) for i in rows)
+        else:
+            actual = sorted((str(i["productCode"]), i["quantity"]) for i in rows)
+        if actual != expected:
+            raise ValueError
+    except (EzMcdError, AttributeError, KeyError, TypeError, ValueError):
+        raise EzMcdError("confirmation_components_mismatch") from None
+
+
 def checkout(args, cart, confirmation, daypart):
     pickup = pickup_time(args.pickup_at)
     if (str(cart.get("storeCode")) != args.store_code or cart.get("beType") != 1
@@ -144,10 +177,7 @@ def checkout(args, cart, confirmation, daypart):
                 or cents(row.get("subtotal")) != p["subTotalPrice"]):
             raise EzMcdError("confirmation_product_mismatch")
         seen.add(seq)
-        expected_components = sorted((str(i["code"]), i["quantity"]) for g in p.get("comboItems", []) for i in g.get("comboProducts", []))
-        actual_components = sorted((str(i["productCode"]), i["quantity"]) for i in row.get("comboItemList", []))
-        if expected_components != actual_components:
-            raise EzMcdError("confirmation_components_mismatch")
+        verify_confirmation_components(p, row.get("comboItemList", []))
         coupons = row.get("couponList", [])
         if p.get("coupon"):
             coupon = p["coupon"]

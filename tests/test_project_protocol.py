@@ -7,7 +7,7 @@ import sys
 import unittest
 from unittest.mock import patch, Mock
 
-from ezmcd.catalog import checkout, menu_products, public_menu
+from ezmcd.catalog import checkout, menu_products, public_menu, verify_confirmation_components
 from ezmcd.errors import EzMcdError
 from ezmcd.models import CheckoutInput
 from ezmcd.protocol.signing import sign_v4, constants, Signer
@@ -20,6 +20,36 @@ BINARY = Path("/Applications/McdApp.app/WrappedBundle/McdApp")
 
 
 class ProjectProtocolTests(unittest.TestCase):
+    def test_single_choice_confirmation_rows_are_not_treated_as_combo_products(self):
+        p = {"type": 1, "customization": {"options": [], "items": [{"code": "222", "key": "1-1",
+            "displayText": "冰(少冰)", "values": [{"code": "4", "name": "少冰", "price": 0, "quantity": 1}]}]}}
+        rows = [{"name": "冰(少冰)", "quantity": 1}]
+        verify_confirmation_components(p, rows)
+        for change in ("name", "quantity", "missing", "duplicate", "unknown", "product_code", "mixed"):
+            wrong = deepcopy(rows)
+            if change == "name": wrong[0]["name"] = "冰(标准)"
+            if change == "quantity": wrong[0]["quantity"] = 2
+            if change == "missing": wrong = []
+            if change == "duplicate": wrong *= 2
+            if change == "unknown": wrong[0]["new_field"] = "unexpected"
+            if change == "product_code": wrong[0]["productCode"] = "222"
+            if change == "mixed": wrong.append({"productCode": "222", "quantity": 1})
+            with self.subTest(change=change), self.assertRaisesRegex(EzMcdError, "confirmation_components_mismatch"):
+                verify_confirmation_components(p, wrong)
+
+    def test_only_observed_free_single_item_confirmation_shape_is_accepted(self):
+        p = {"type": 1, "customization": {"options": [], "items": [{"code": "222", "key": "1-1",
+            "displayText": "冰(少冰)", "values": [{"code": "4", "price": 0, "quantity": 1}]}]}}
+        for change in ("combo", "paid", "empty", "duplicate_choice", "unknown_options"):
+            wrong = deepcopy(p)
+            if change == "combo": wrong["type"] = 7
+            if change == "paid": wrong["customization"]["items"][0]["values"][0]["price"] = 500
+            if change == "empty": wrong["customization"]["items"] = []
+            if change == "duplicate_choice": wrong["customization"]["items"] *= 2
+            if change == "unknown_options": wrong["customization"]["options"] = [{"code": "333"}]
+            with self.subTest(change=change), self.assertRaisesRegex(EzMcdError, "confirmation_components_mismatch"):
+                verify_confirmation_components(wrong, [{"name": "冰(少冰)", "quantity": 1}])
+
     def test_nested_menus_and_distinct_offers_are_preserved_without_coupon_credentials(self):
         source = {"menu": [{"categoryName": "parent", "categories": [{"categoryName": "child", "productList": [
             {"productCode": "123", "productName": "coffee", "cardId": "private-card", "couponId": "private-coupon", "priceInfo": {"eatInPrice": 600}},

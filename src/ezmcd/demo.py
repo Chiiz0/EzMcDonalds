@@ -118,8 +118,18 @@ class DemoProvider:
         return checkout(args, cart, conf, "2")
 
     def cart(self, args):
+        if not self.read()["cart_quantity"]:
+            self.store(args.store_code)
+            return {"simulation": True, "items": [], "store_code": args.store_code, "pickup_at": args.pickup_at}
         q = self.quote(args)
-        return {"simulation": True, "items": q["items"]}
+        return {"simulation": True, "items": q["items"], "store_code": args.store_code, "pickup_at": args.pickup_at}
+
+    def cart_state(self, args):
+        cart = self.cart(args)
+        return cart, {}, fingerprint(cart)
+
+    def clear_cart(self, body):
+        return self.write_cart({"quantity": 0})
 
     def simple_cart_draft(self, args, selections):
         if any(s.coupon_ref for s in selections):
