@@ -72,6 +72,7 @@ class ModifierSelection(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     code: str = Field(pattern=r"^[0-9]{1,20}$")
     quantity: int = Field(ge=0, le=1)
+    key: str | None = Field(default=None, pattern=r"^[0-9]{1,4}-[0-9]{1,4}$")
 
 
 class ComponentSelection(BaseModel):
@@ -94,6 +95,7 @@ class ItemSelection(BaseModel):
     product_code: str = Field(pattern=r"^[A-Za-z0-9]{1,20}$")
     quantity: int = Field(default=1, ge=1, le=20)
     offer_id: str | None = None
+    coupon_ref: str | None = Field(default=None, pattern=r"^coupon-[0-9a-f]{24}$")
     combo: list[ComboSelection] = Field(default_factory=list, max_length=20)
     modifiers: list[ModifierSelection] | None = Field(default=None, max_length=20)
 

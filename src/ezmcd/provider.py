@@ -8,6 +8,7 @@ from .discovery import cities, pickup_choices, resolve_city, store_results
 from .models import pickup_time, cents, yuan
 from .protocol.signing import device_update_metadata
 from .products import choose_offer, configured_product, public_detail
+from .coupons import coupon_rows, choose_coupon, coupon_offers, public_coupon, public_coupon_products
 from .transport import Transport, data
 
 
@@ -24,6 +25,34 @@ class McdProvider:
 
     def assets(self):
         return membership_assets(self.get("/bff/promotion/coupons/rightCards", {"scene": "3"}))
+
+    def _coupons(self, args, daypart, params):
+        scope = {"identity": self.account["identity"], "store_code": args.store_code,
+                 "pickup_at": args.pickup_at, "eat_type": args.eat_type}
+        raw = self.get("/bff/promotion/coupons/menu/available", params | {
+            "cardId": "", "beType": "1", "isPromoter": "0", "daypartCode": daypart, "scene": ""})
+        return coupon_rows(raw, scope)
+
+    def coupons(self, args, keyword=""):
+        if not isinstance(keyword, str) or len(keyword) > 80:
+            raise EzMcdError("invalid_coupon_keyword")
+        daypart, params = self.context(args)
+        rows = self._coupons(args, daypart, params)
+        return {"store_code": args.store_code, "pickup_at": args.pickup_at,
+                "coupons": [public_coupon(c) for c in rows if keyword.casefold() in c["title"].casefold()],
+                "cart_changed": False, "order_created": False, "final_eligibility_requires_quote": True}
+
+    def _coupon_offers(self, args, ref, daypart, params):
+        coupon = choose_coupon(self._coupons(args, daypart, params), ref)
+        raw = self.get("/bff/promotion/coupons/products", params | {"channelCode": "03",
+            "couponCode": coupon["code"], "couponId": coupon["id"], "promotionId": coupon["promotionId"],
+            "daypartCodes": daypart})
+        return coupon, coupon_offers(coupon, raw)
+
+    def coupon_products(self, args, coupon_ref):
+        daypart, params = self.context(args)
+        coupon, offers = self._coupon_offers(args, coupon_ref, daypart, params)
+        return public_coupon_products(coupon, offers) | {"store_code": args.store_code, "pickup_at": args.pickup_at}
 
     def favorites(self):
         return self.get("/bff/store/stores/collection/list", {"beType": "1"})
@@ -85,11 +114,22 @@ class McdProvider:
             "cardId": offer.get("cardId") or "", "pinId": "", "date": params["date"].replace("-", ""),
             "fromCombo": False, "customization": False}))
 
-    def product_detail(self, args, product_code, offer_id=None):
+    def product_detail(self, args, product_code, offer_id=None, coupon_ref=None):
         daypart, params = self.context(args)
-        menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
+        coupon = None
+        if coupon_ref:
+            coupon, menu = self._coupon_offers(args, coupon_ref, daypart, params)
+        else:
+            menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
         offer = choose_offer(menu, product_code, offer_id)
         result = public_detail(self._detail(offer, daypart, params), offer)
+        if coupon:
+            result.update(coupon_ref=coupon_ref, coupon=public_coupon(coupon))
+            if offer["_coupon_configuration_issues"]:
+                result["standard_configuration_supported"] = False
+            result["coupon_configuration_issues"] = offer["_coupon_configuration_issues"]
+            if type(result.get("max_quantity")) is int:
+                result["max_quantity"] = min(result["max_quantity"], offer["_coupon_max_quantity"])
         for variant in result["variants"]:
             variant["menu_offers"] = [{"offer_id": p["offer_id"], "card_name": p.get("cardName"),
                 "display_price_cny": yuan(p["priceInfo"]["eatInPrice"]) if type(p.get("priceInfo", {}).get("eatInPrice")) is int else None}
@@ -106,10 +146,20 @@ class McdProvider:
             raise EzMcdError("cart_store_or_fulfillment_mismatch")
         if cart.get("products"):
             raise EzMcdError("cart_not_empty_use_existing_cart_or_clear_in_official_app")
-        menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
+        menu = None
+        used_coupons = set()
         products = []
         for index, selection in enumerate(selections):
-            offer = choose_offer(menu, selection.product_code, selection.offer_id)
+            if selection.coupon_ref:
+                if selection.coupon_ref in used_coupons:
+                    raise EzMcdError("coupon_used_more_than_once_in_cart_draft")
+                used_coupons.add(selection.coupon_ref)
+                _, offers = self._coupon_offers(args, selection.coupon_ref, daypart, params)
+            else:
+                if menu is None:
+                    menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
+                offers = menu
+            offer = choose_offer(offers, selection.product_code, selection.offer_id)
             products.append(configured_product(selection, offer, self._detail(offer, daypart, params), index + 1))
         return params | {"cartType": "1", "channelCode": "03", "pinId": "", "dataSource": 1,
                          "daypartCode": daypart, "scenes": "", "products": products}
@@ -125,6 +175,8 @@ class McdProvider:
     def simple_cart_draft(self, args, selections):
         if not 1 <= len(selections) <= 20:
             raise EzMcdError("select_between_1_and_20_products")
+        if any(s.combo or s.modifiers is not None or s.coupon_ref is not None for s in selections):
+            raise EzMcdError("use_cart_add_configured_for_combo_choices")
         daypart, params = self.context(args)
         cart = self.get("/bff/cart/carts", params | {"cartType": "1", "channelCode": "03", "pinId": "", "daypartCode": daypart})
         if cart.get("products"):
@@ -132,8 +184,6 @@ class McdProvider:
         menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
         products = []
         for index, selection in enumerate(selections):
-            if selection.combo or selection.modifiers is not None:
-                raise EzMcdError("use_cart_add_configured_for_combo_choices")
             matches = {p["offer_id"]: p for p in menu if str(p.get("productCode")) == selection.product_code
                        and (selection.offer_id is None or p["offer_id"] == selection.offer_id)}
             if len(matches) != 1:

@@ -1,4 +1,4 @@
-"""The pinned client's free binary ingredient choices, never arbitrary blobs.
+"""The pinned client's free toggles and single choices, never arbitrary blobs.
 
 The native cartModificationItemsFromDetail:oldItems: emits code, quantity=1
 and selectedKey/unselectedKey inside modification.values. Those keys describe
@@ -9,7 +9,7 @@ import re
 from .errors import EzMcdError
 
 
-def binary_groups(product):
+def modifier_groups(product):
     if product.get("grills") or product.get("biasChoices"):
         raise EzMcdError("advanced_customization_requires_official_cart")
     modification = product.get("modification") or {}
@@ -18,57 +18,93 @@ def binary_groups(product):
     groups = modification.get("items", [])
     if not isinstance(groups, list) or len(groups) > 20 or product.get("hasCustomization") and not groups:
         raise EzMcdError("advanced_customization_requires_official_cart")
-    seen = set()
+    seen, result = set(), []
     for group in groups:
         values = group.get("values", [])
         low, high = group.get("minValues"), group.get("maxValues")
         if (not isinstance(values, list) or not values or type(low) is not int or type(high) is not int
                 or not 0 <= low <= high <= len(values)):
             raise EzMcdError("advanced_customization_requires_official_cart")
+        modes = {v.get("displayMode") for v in values}
+        if modes not in ({1}, {2}):
+            raise EzMcdError("advanced_customization_requires_official_cart")
+        single = modes == {1}
+        codes, keys = set(), set()
+        if single and (low != 1 or high != 1 or len(values) > 20):
+            raise EzMcdError("advanced_customization_requires_official_cart")
         for item in values:
             code = item.get("code")
             if (not isinstance(code, str) or not re.fullmatch(r"[0-9]{1,20}", code) or code in seen
                     or any(type(item.get(k)) is not int for k in ("displayMode", "minQuantity", "maxQuantity", "price"))
-                    or item.get("displayMode") != 2 or item.get("minQuantity") != 0
+                    or item.get("minQuantity") != 0
                     or item.get("maxQuantity") != 1 or type(item.get("selectedQuantity")) is not int
-                    or item["selectedQuantity"] not in (0, 1) or item.get("selectedKey") != "0-1"
-                    or item.get("unselectedKey") != "0-0" or item.get("price") != 0
-                    or item.get("soldOut") is not False):
+                    or item["selectedQuantity"] not in (0, 1) or type(item.get("soldOut")) is not bool):
                 raise EzMcdError("advanced_customization_requires_official_cart")
-            seen.add(code)
+            if single:
+                key = item.get("selectedKey")
+                if (not isinstance(key, str) or not re.fullmatch(r"[0-9]{1,4}-[0-9]{1,4}", key)
+                        or key in keys or item.get("unselectedKey") or item["price"] < 0):
+                    raise EzMcdError("advanced_customization_requires_official_cart")
+                keys.add(key)
+            elif (code in codes or item.get("selectedKey") != "0-1" or item.get("unselectedKey") != "0-0"
+                    or item["price"] != 0 or item["soldOut"]):
+                raise EzMcdError("advanced_customization_requires_official_cart")
+            codes.add(code)
+        if single and len(codes) != 1:
+            raise EzMcdError("advanced_customization_requires_official_cart")
+        seen.update(codes)
+        inactive = single and all(v["soldOut"] and v["selectedQuantity"] == 0 for v in values)
+        result.append(group | {"_kind": "single_choice" if single else "toggle", "_inactive": inactive})
     if len(seen) > 20:
         raise EzMcdError("advanced_customization_requires_official_cart")
-    return groups
+    return result
 
 
 def selected_modification(product, selections=None):
-    groups = binary_groups(product)
-    values = [v for g in groups for v in g["values"]]
-    if selections is None:
-        quantities = {v["code"]: v["selectedQuantity"] for v in values}
-    else:
-        quantities = {s.code: s.quantity for s in selections}
-        if len(quantities) != len(selections) or set(quantities) != {v["code"] for v in values}:
+    groups = [g for g in modifier_groups(product) if not g["_inactive"]]
+    choices = {s.code: s for s in selections} if selections is not None else None
+    if choices is not None:
+        if len(choices) != len(selections) or set(choices) != {v["code"] for g in groups for v in g["values"]}:
             raise EzMcdError("select_every_modifier_exactly_once")
+    values = []
     for group in groups:
-        if not group["minValues"] <= sum(quantities[v["code"]] for v in group["values"]) <= group["maxValues"]:
-            raise EzMcdError("modifier_quantity_outside_live_limits")
+        options = group["values"]
+        if group["_kind"] == "single_choice":
+            if choices is None:
+                selected = [v for v in options if v["selectedQuantity"] == 1]
+            else:
+                choice = choices[options[0]["code"]]
+                selected = [v for v in options if v["selectedKey"] == choice.key and choice.quantity == 1]
+            if len(selected) != 1 or selected[0]["soldOut"] or selected[0]["price"] != 0:
+                raise EzMcdError("select_one_available_free_modifier_choice")
+            values.append({"code": selected[0]["code"], "quantity": 1, "key": selected[0]["selectedKey"]})
+        else:
+            quantities = {v["code"]: choices[v["code"]].quantity if choices is not None else v["selectedQuantity"] for v in options}
+            if choices is not None and any(choices[v["code"]].key is not None for v in options):
+                raise EzMcdError("toggle_modifier_does_not_accept_choice_key")
+            if not group["minValues"] <= sum(quantities.values()) <= group["maxValues"]:
+                raise EzMcdError("modifier_quantity_outside_live_limits")
+            values.extend({"code": v["code"], "quantity": 1,
+                "key": v["selectedKey"] if quantities[v["code"]] else v["unselectedKey"]} for v in options)
     if not values:
         return {"customization": {"options": [], "items": []}}
-    return {"modification": {"values": [{"code": v["code"], "quantity": 1,
-        "key": v["selectedKey"] if quantities[v["code"]] else v["unselectedKey"]} for v in values]}}
+    return {"modification": {"values": values}}
 
 
 def public_modifiers(product):
     try:
-        groups = binary_groups(product)
+        groups = modifier_groups(product)
         selected_modification(product)
     except (EzMcdError, TypeError, KeyError, AttributeError):
         return {"supported": False, "groups": [], "reason": "advanced_customization_requires_official_cart"}
-    return {"supported": True, "selection_rule": "If modifiers are supplied, specify every listed code exactly once; 0 removes and 1 includes.",
-        "groups": [{"index": i, "min_quantity": g["minValues"], "max_quantity": g["maxValues"],
+    from .models import yuan
+    return {"supported": True, "selection_rule": "Specify every active code once: toggles use quantity 0/1 without key; single_choice uses quantity=1 and the selected listed key. Inactive groups are omitted. Paid choices require the official App.",
+        "groups": [{"index": i, "name": g.get("title", ""), "kind": g["_kind"], "inactive": g["_inactive"],
+            "min_quantity": g["minValues"], "max_quantity": g["maxValues"],
             "choices": [{"code": v["code"], "name": v.get("name", ""), "default_quantity": v["selectedQuantity"],
-                         "extra_cny": "0.00"} for v in g["values"]]} for i, g in enumerate(groups)]}
+                         "available": not v["soldOut"], "extra_cny": yuan(v["price"]),
+                         **({"key": v["selectedKey"]} if g["_kind"] == "single_choice" else {})}
+                        for v in g["values"]]} for i, g in enumerate(groups)]}
 
 
 def verify_modification(expected, actual):

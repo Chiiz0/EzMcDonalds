@@ -41,6 +41,14 @@ class DemoProvider:
         return {"simulation": True, "cards": [], "coupon_categories": [],
                 "applicability_requires_live_menu_and_quote": True}
 
+    def coupons(self, args, keyword=""):
+        self.store(args.store_code)
+        return {"simulation": True, "coupons": [], "store_code": args.store_code, "pickup_at": args.pickup_at,
+                "cart_changed": False, "order_created": False, "final_eligibility_requires_quote": True}
+
+    def coupon_products(self, args, coupon_ref):
+        raise EzMcdError("demo_has_no_coupons")
+
     def cities(self, keyword=""):
         rows = [{"city_code": "900000", "name": "演示城市"}]
         return {"simulation": True, "cities": [r for r in rows if keyword in r["name"] or keyword == r["city_code"]]}
@@ -74,15 +82,17 @@ class DemoProvider:
             "products": [{"product_code": "100001", "name": "演示汉堡", "offer_id": "demo-offer", "product_type": 1,
             "display_price_cny": "10.00", "requires_configuration": False, "display_price_is_final_quote": False}]}
 
-    def product_detail(self, args, product_code, offer_id=None):
+    def product_detail(self, args, product_code, offer_id=None, coupon_ref=None):
         self.store(args.store_code)
+        if coupon_ref is not None:
+            raise EzMcdError("demo_has_no_coupons")
         if product_code != "100001":
             raise EzMcdError("demo_product_not_found")
         return {"simulation": True, "product_code": "100001", "name": "演示汉堡", "offer_id": "demo-offer",
                 "product_type": 1, "groups": [], "max_quantity": 20, "display_price_is_final_quote": False}
 
     def configured_cart_draft(self, args, selections):
-        if any(s.combo or s.modifiers for s in selections):
+        if any(s.combo or s.modifiers or s.coupon_ref for s in selections):
             raise EzMcdError("demo_has_no_combo_choices")
         return self.simple_cart_draft(args, selections)
 
@@ -112,6 +122,8 @@ class DemoProvider:
         return {"simulation": True, "items": q["items"]}
 
     def simple_cart_draft(self, args, selections):
+        if any(s.coupon_ref for s in selections):
+            raise EzMcdError("demo_has_no_coupons")
         if len(selections) != 1 or selections[0].product_code != "100001":
             raise EzMcdError("demo_requires_one_demo_product")
         return {"quantity": selections[0].quantity}

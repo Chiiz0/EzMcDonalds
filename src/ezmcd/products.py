@@ -6,6 +6,7 @@ trusted. Advanced customization continues to use the configured official cart.
 from .errors import EzMcdError
 from .models import yuan
 from .modifiers import public_modifiers, selected_modification, verify_modification
+from .coupons import coupon_fields, verify_coupon_cart
 
 
 def choose_offer(menu, product_code, offer_id=None):
@@ -65,6 +66,7 @@ def cart_configuration(product, modifiers=None):
 def verify_configured_cart(draft, cart):
     """Verify the new modifier path after the one cart write; never retry it."""
     for expected in draft.get("products", []):
+        verify_coupon_cart(expected, cart.get("items", []))
         checks = [expected] + [p for g in expected.get("comboItems", []) for p in g.get("comboProducts", [])]
         if not any("modification" in p for p in checks):
             continue
@@ -131,6 +133,8 @@ def configured_product(selection, offer, detail, sequence):
             if offer.get(field) in (None, ""):
                 raise EzMcdError("live_card_offer_incomplete")
             result[field] = offer[field]
+    elif offer.get("_coupon_source"):
+        result.update(coupon_fields(offer, selection.quantity))
     elif offer.get("couponId") or offer.get("productPromotions"):
         raise EzMcdError("promotion_configuration_requires_official_cart")
     groups = product.get("comboItems", [])

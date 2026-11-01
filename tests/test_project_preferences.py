@@ -212,6 +212,99 @@ class PreferenceTests(unittest.TestCase):
         self.assertTrue(result["selection_ready"])
         self.assertEqual(result["items"][0]["combo"][1], {"round": 2, "items": []})
 
+    def coupon_preferences(self):
+        self.preferences.require_card_discount = False
+        self.preferences.items[0].coupon_name = "示例优惠券"
+        save_preferences(self.store, self.preferences)
+        self.provider.coupons.return_value = {"coupons": [{"name": "示例优惠券", "available_for_request": True,
+            "coupon_ref": "coupon-" + "a" * 24, "configuration_path": "coupon_products"}]}
+        self.provider.coupon_products.return_value = {"products": [self.offer | {
+            "card_name": None, "display_price_cny": "9.90", "cart_configuration_supported": True}]}
+
+    def test_coupon_preference_resolves_current_reference_and_preserves_stable_purchase_key(self):
+        self.coupon_preferences()
+        result = plan_meal(self.service, "test")
+        self.assertTrue(result["selection_ready"])
+        self.assertEqual(result["estimated_amount_cny"], "9.90")
+        self.assertEqual(result["items"][0]["coupon_ref"], "coupon-" + "a" * 24)
+        self.assertEqual(result["products"][0]["coupon_name"], "示例优惠券")
+        self.provider.menu.assert_not_called()
+        self.assertEqual(self.provider.product_detail.call_args.args[-1], "coupon-" + "a" * 24)
+        self.provider.coupons.return_value["coupons"][0]["coupon_ref"] = "coupon-" + "b" * 24
+        changed = plan_meal(self.service, "test")
+        self.assertEqual(changed["idempotency_key"], result["idempotency_key"])
+        self.assertEqual(changed["items"][0]["coupon_ref"], "coupon-" + "b" * 24)
+
+    def test_expired_missing_ambiguous_or_special_coupon_does_not_fall_back_to_menu_price(self):
+        self.coupon_preferences()
+        original = deepcopy(self.provider.coupons.return_value)
+        for case in ("expired", "missing", "ambiguous", "special"):
+            value = deepcopy(original)
+            if case == "expired": value["coupons"][0]["available_for_request"] = False
+            if case == "missing": value["coupons"] = []
+            if case == "ambiguous": value["coupons"] *= 2
+            if case == "special": value["coupons"][0]["configuration_path"] = "official_app"
+            self.provider.coupons.return_value = value
+            result = plan_meal(self.service, "test")
+            self.assertFalse(result["selection_ready"])
+            self.assertEqual(result["items"], [])
+        self.provider.menu.assert_not_called()
+        self.provider.coupon_products.assert_not_called()
+        self.provider.product_detail.assert_not_called()
+
+    def test_card_requirement_and_explicit_coupon_cannot_be_silently_combined(self):
+        self.coupon_preferences()
+        self.preferences.require_card_discount = True
+        save_preferences(self.store, self.preferences)
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.assertEqual(result["issues"][0]["reason"], "explicit_coupon_conflicts_with_required_card_discount")
+        self.provider.coupons.assert_not_called()
+
+    def test_preferred_product_outside_selected_coupon_is_not_eligible(self):
+        self.coupon_preferences()
+        self.provider.coupon_products.return_value["products"][0]["name"] = "另一种餐品"
+        result = plan_meal(self.service, "test")
+        self.assertFalse(result["selection_ready"])
+        self.provider.product_detail.assert_not_called()
+
+    def test_single_choice_preference_resolves_named_option_to_current_key(self):
+        from test_project_modifiers import iced_coffee
+        from ezmcd.modifiers import public_modifiers
+        public = public_modifiers(iced_coffee())
+        self.detail["groups"][0]["choices"][0]["modifiers"] = public
+        value = self.preferences.model_dump()
+        value["items"][0]["component_modifiers"] = [{"component_name": "咖啡", "modifiers": [
+            {"name": "少冰", "quantity": 1, "group_name": "冰(单选)"}]}]
+        save_preferences(self.store, MealPreferences.model_validate(value))
+        result = plan_meal(self.service, "test")
+        self.assertTrue(result["selection_ready"])
+        self.assertEqual(result["items"][0]["combo"][0]["items"][0]["modifiers"], [{"code": "222", "quantity": 1, "key": "1-1"}])
+        # A live revision changes the key, and the next plan resolves it afresh.
+        public["groups"][0]["choices"][3]["key"] = "2-1"
+        self.assertEqual(plan_meal(self.service, "test")["items"][0]["combo"][0]["items"][0]["modifiers"][0]["key"], "2-1")
+
+    def test_conflicting_paid_inactive_or_ambiguous_single_choices_do_not_silently_default(self):
+        from test_project_modifiers import iced_coffee
+        from ezmcd.modifiers import public_modifiers
+        original = public_modifiers(iced_coffee())
+        for case in ("conflict", "paid", "inactive", "ambiguous", "quantity_zero"):
+            public = deepcopy(original)
+            preferences = [{"name": "少冰", "quantity": 1}]
+            if case == "conflict": preferences.append({"name": "去冰", "quantity": 1})
+            if case == "paid": public["groups"][0]["choices"][3]["extra_cny"] = "5.00"
+            if case == "inactive": preferences = [{"name": "不加", "quantity": 1}]
+            if case == "ambiguous": public["groups"][0]["choices"][2]["name"] = "少冰"
+            if case == "quantity_zero": preferences[0]["quantity"] = 0
+            self.detail["groups"][0]["choices"][0]["modifiers"] = public
+            value = self.preferences.model_dump()
+            value["items"][0]["component_modifiers"] = [{"component_name": "咖啡", "modifiers": preferences}]
+            save_preferences(self.store, MealPreferences.model_validate(value))
+            with self.subTest(case=case):
+                result = plan_meal(self.service, "test")
+                self.assertFalse(result["selection_ready"])
+                self.assertEqual(result["items"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

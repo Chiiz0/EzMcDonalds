@@ -5,6 +5,7 @@ from urllib.parse import urlsplit
 
 from .errors import EzMcdError
 from .models import cents, fingerprint, pickup_time, yuan
+from .coupons import coupon_signature
 
 
 def menu_products(menu):
@@ -96,6 +97,7 @@ def cart_items(cart):
     return [{"product_code": str(p["code"]), "name": p["name"], "quantity": p["quantity"],
              "product_type": str(p["type"]), "components": component_spec(p),
              "configuration": {k: deepcopy(p[k]) for k in ("customization", "modification", "grills", "biasChoices") if k in p},
+             "coupon_fingerprint": coupon_signature(p["coupon"]) if p.get("coupon") else None,
              "amount_cents": p["realSubTotalPrice"]} for p in cart.get("products", [])]
 
 

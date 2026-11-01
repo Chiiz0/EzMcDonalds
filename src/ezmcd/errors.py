@@ -27,7 +27,12 @@ def error_result(code):
         "runtime_headers_require_private_terminal": ("运行请求头只能在本机私有终端输入。", "直接在终端运行 account runtime ALIAS --paste-headers；不要把凭据放进参数、管道或聊天。"),
         "runtime_header_value_invalid": ("粘贴的请求头值为空或格式不正确。", "逐项粘贴官方请求的 sid、token、x-mcd-sign 的值，不含字段名或换行。"),
         "cart_modifier_selection_not_confirmed_review_cart": ("服务器购物车没有确认所选配料。", "先调用 cart_get 核对；不要自动重新加购或继续付款，必要时在官方 App 修正。"),
-        "select_every_modifier_exactly_once": ("配料选择不完整或重复。", "重新读取 product_detail，对该商品所有支持的配料各给出一次 0（去除）或 1（保留）。"),
+        "select_every_modifier_exactly_once": ("配料选择不完整或重复。", "重新读取 product_detail，对所有活动组的代码各选择一次；保留/去除用0或1，单选组用数量1及所选项的实时 key。"),
+        "select_one_available_free_modifier_choice": ("单选配料不明确、售罄或需要加价。", "从 product_detail 的对应组选择一个免费且可用的选项，使用其 key 和数量1；收费定制交回官方 App。"),
+        "coupon_not_found_for_account_store_time": ("这张券不属于当前账号、门店或取餐时间的结果。", "重新调用 coupons_list 选择，不沿用其他请求的 coupon_ref，也不自动改成原价。"),
+        "coupon_unavailable_for_selected_pickup": ("当前门店或取餐时间无法使用这张券，或次数已用完。", "重新查询券的适用状态和规则，由用户选择其他券或调整安排；不自动换券或原价购买。"),
+        "coupon_configuration_or_quantity_requires_review": ("该券的商品配置或数量不在支持范围内。", "重新查询 coupon_products 与 product_detail；需要特殊兑换流程的券交回官方 App。"),
+        "cart_coupon_not_confirmed_review_cart": ("服务器购物车没有确认所选优惠券。", "先调用 cart_get 核对；不要重新加购或继续付款，必要时在官方 App 修正。"),
     }
     message, action = help_text.get(code, ("本次操作未完成。", "查看错误码与账号诊断；涉及订单的未知结果只查询，不重复提交。"))
     return {"ok": False, "error": code, "message": message, "next_action": action, "automatic_write_retry": False}

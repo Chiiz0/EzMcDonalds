@@ -43,8 +43,10 @@
 | `store_get` | 按代码查店 | 只读 |
 | `pickup_slots` | 北京时间具体可预约时间、餐段 | 只读 |
 | `menu_list` | 门店/时段菜单、名称过滤 | 只读 |
-| `product_detail` | 套餐轮次、组件、数量及加价 | 只读 POST |
-| `cart_add_configured` | 按实时详情选择组件、单品或卡优惠 | 改空购物车，需幂等键 |
+| `coupons_list` | 当前账号、门店和时段的券、适用状态与规则 | 只读 |
+| `coupon_products` | 使用当前 coupon_ref 查询对应商品 | 只读 |
+| `product_detail` | 套餐轮次、配料、数量及加价；可传 coupon_ref | 只读 POST |
+| `cart_add_configured` | 按实时详情选择组件、单品、卡优惠或支持的单品券 | 改空购物车，需幂等键 |
 | `cart_get` | 已配置购物车 | 只读 |
 | `cart_add_simple` | 空购物车加普通无规格单品 | 改购物车，需幂等键 |
 | `checkout_quote` | 明细、优惠、上限、钱包缺口及下单阻碍 | 外部只读，本机保存报价 |
@@ -90,6 +92,8 @@
 
 `simulation=true`始终表示离线演示，演示店号和取餐号不能实际使用。
 
-`product_detail` 会返回 `modifiers` 支持标记。免费二选配料可在 `cart_add_configured` 的对应商品/组件上逐项给出 `code` 与 `quantity`（0 或 1）；传入时不能漏项。加购回读未确认配料时停止，不能换 key 重试。规格聚合页的 `variants[].menu_offers` 用于继续查询具体商品，不能直接购买聚合页。详见[商品选择](products.md)。
+`product_detail` 会返回 `modifiers` 支持标记。免费保留/去除配料给出 `code` 与 `quantity`（0 或 1）；单选组给出一个选项的 `code`、`quantity=1` 及实时 `key`。传入时不能漏掉活动组。加购回读未确认配料时停止，不能换 key 重试。规格聚合页的 `variants[].menu_offers` 用于继续查询具体商品，不能直接购买聚合页。详见[商品选择](products.md)。
+
+`coupons_list → coupon_products → product_detail` 使用同一 `request`，详情与选择带上返回的 `coupon_ref`。加购前重新核验，券失效时不回退原价；加购后必须回读确认券。详见[优惠券选择](coupons.md)。
 
 凭据维护仅在本机 CLI 进行：`account runtime` 可单独更新样本或显式检查同设备上下文复用。MCP 不接收运行样本、手机号或验证码，也不提供修改消费策略的工具。

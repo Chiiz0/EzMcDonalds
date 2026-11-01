@@ -15,6 +15,7 @@ class PreferredModifier(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=120)
     quantity: int = Field(ge=0, le=1)
+    group_name: str | None = Field(default=None, min_length=1, max_length=120)
 
     @field_validator("name")
     @classmethod
@@ -32,7 +33,7 @@ class PreferredComponentModifiers(BaseModel):
     @field_validator("modifiers")
     @classmethod
     def distinct_modifiers(cls, values):
-        if len({v.name for v in values}) != len(values):
+        if len({(v.group_name, v.name) for v in values}) != len(values):
             raise ValueError("Choose each ingredient only once")
         return values
 
@@ -40,6 +41,7 @@ class PreferredComponentModifiers(BaseModel):
 class PreferredItem(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     name: str = Field(min_length=1, max_length=120)
+    coupon_name: str | None = Field(default=None, min_length=1, max_length=120)
     quantity: int = Field(default=1, ge=1, le=20)
     component_names: list[str] = Field(default_factory=list, max_length=20)
     modifiers: list[PreferredModifier] = Field(default_factory=list, max_length=20)
@@ -151,18 +153,43 @@ def resolve_modifiers(public, preferences):
     if not public or not public.get("supported"):
         return None, [{"reason": "preferred_ingredient_configuration_unsupported"}]
     groups = public["groups"]
-    choices = [c for g in groups for c in g["choices"]]
-    quantities = {c["code"]: c["default_quantity"] for c in choices}
-    issues = []
+    choices = [(i, j, c) for i, g in enumerate(groups) for j, c in enumerate(g["choices"])]
+    quantities = {(i, j): c["default_quantity"] for i, j, c in choices}
+    issues, changed_groups = [], set()
     for preference in preferences:
-        matches = [c for c in choices if c["name"] == preference.name]
+        matches = [(i, j, c) for i, j, c in choices if c["name"] == preference.name
+                   and (preference.group_name is None or groups[i].get("name") == preference.group_name)]
         if len(matches) != 1:
             issues.append({"reason": "preferred_ingredient_missing_or_ambiguous", "name": preference.name})
-        else:
-            quantities[matches[0]["code"]] = preference.quantity
-    if any(not g["min_quantity"] <= sum(quantities[c["code"]] for c in g["choices"]) <= g["max_quantity"] for g in groups):
-        issues.append({"reason": "preferred_ingredients_outside_live_limits"})
-    return ([{"code": c["code"], "quantity": quantities[c["code"]]} for c in choices] if not issues else None), issues
+            continue
+        i, j, choice = matches[0]
+        if groups[i].get("inactive") or not choice.get("available", True):
+            issues.append({"reason": "preferred_ingredient_unavailable", "name": preference.name})
+            continue
+        if groups[i].get("kind") == "single_choice":
+            if preference.quantity != 1 or i in changed_groups:
+                issues.append({"reason": "select_one_preferred_option_per_group", "group": groups[i].get("name")})
+                continue
+            changed_groups.add(i)
+            for k in range(len(groups[i]["choices"])):
+                quantities[i, k] = 0
+        quantities[i, j] = preference.quantity
+    selected = []
+    for i, group in enumerate(groups):
+        if group.get("inactive"):
+            continue
+        if not group["min_quantity"] <= sum(quantities[i, j] for j in range(len(group["choices"]))) <= group["max_quantity"]:
+            issues.append({"reason": "preferred_ingredients_outside_live_limits"})
+        for j, choice in enumerate(group["choices"]):
+            quantity = quantities[i, j]
+            if quantity and (not choice.get("available", True) or cents(choice.get("extra_cny", "0.00")) != 0):
+                issues.append({"reason": "preferred_ingredient_unavailable_or_paid", "name": choice["name"]})
+            if group.get("kind") == "single_choice":
+                if quantity:
+                    selected.append({"code": choice["code"], "quantity": 1, "key": choice["key"]})
+            else:
+                selected.append({"code": choice["code"], "quantity": quantity})
+    return (selected if not issues else None), issues
 
 
 def apply_preferred_modifiers(detail, preference, groups):
@@ -219,11 +246,31 @@ def plan_meal(service, account=None, date=None):
         return result | {"issues": [{"reason": "preferred_pickup_time_unavailable", "available_slots": slots}]}
     request = CheckoutInput(account=alias, store_code=preferences.store_code, pickup_at=min(possible),
                             max_amount_cny=preferences.max_amount_cny, eat_type=preferences.eat_type)
-    menu = provider.menu(request)["products"]
+    menu = None
     selections, descriptions, issues, estimate = [], [], [], 0
     for preference in preferences.items:
-        offers = [p for p in menu if p["name"] == preference.name and str(p.get("product_type")) in ("1", "7")
-                  and (not preferences.require_card_discount or p.get("card_name"))]
+        coupon_ref = None
+        if preference.coupon_name:
+            if preferences.require_card_discount:
+                issues.append({"reason": "explicit_coupon_conflicts_with_required_card_discount", "name": preference.name})
+                continue
+            candidates = [c for c in provider.coupons(request)["coupons"] if c["name"] == preference.coupon_name]
+            if len(candidates) != 1 or not candidates[0]["available_for_request"]:
+                issues.append({"reason": "preferred_coupon_unavailable_or_ambiguous", "name": preference.coupon_name,
+                               "coupons": candidates})
+                continue
+            if candidates[0]["configuration_path"] != "coupon_products":
+                issues.append({"reason": "preferred_coupon_requires_menu_card_or_official_configuration", "name": preference.coupon_name})
+                continue
+            coupon_ref = candidates[0]["coupon_ref"]
+            choices = provider.coupon_products(request, coupon_ref)["products"]
+            offers = [p for p in choices if p["name"] == preference.name and str(p.get("product_type")) in ("1", "7")
+                      and p["cart_configuration_supported"]]
+        else:
+            if menu is None:
+                menu = provider.menu(request)["products"]
+            offers = [p for p in menu if p["name"] == preference.name and str(p.get("product_type")) in ("1", "7")
+                      and (not preferences.require_card_discount or p.get("card_name"))]
         # Never choose between distinct products merely because their names match.
         if not offers or len({p["product_code"] for p in offers}) != 1:
             issues.append({"reason": "preferred_product_unavailable_or_ambiguous", "name": preference.name, "offers": offers})
@@ -232,7 +279,8 @@ def plan_meal(service, account=None, date=None):
             issues.append({"reason": "offer_price_unknown_choose_explicitly", "name": preference.name, "offers": offers})
             continue
         offer = min(offers, key=lambda p: (cents(p["display_price_cny"]) if p.get("display_price_cny") else 0, p["offer_id"]))
-        detail = provider.product_detail(request, offer["product_code"], offer["offer_id"])
+        detail = (provider.product_detail(request, offer["product_code"], offer["offer_id"], coupon_ref) if coupon_ref else
+                  provider.product_detail(request, offer["product_code"], offer["offer_id"]))
         groups, extra, problems = choose_components(detail, preference.component_names)
         modifiers, modifier_problems = apply_preferred_modifiers(detail, preference, groups)
         problems.extend(modifier_problems)
@@ -243,12 +291,12 @@ def plan_meal(service, account=None, date=None):
                            "details": problems, "max_quantity": detail.get("max_quantity")})
             continue
         selection = ItemSelection(product_code=offer["product_code"], offer_id=offer["offer_id"],
-                                  quantity=preference.quantity, combo=groups, modifiers=modifiers)
-        selections.append(selection.model_dump())
-        descriptions.append({"name": offer["name"], "card_name": offer.get("card_name"),
+                                  quantity=preference.quantity, combo=groups, modifiers=modifiers, coupon_ref=coupon_ref)
+        selections.append(selection.model_dump(exclude_none=True))
+        descriptions.append({"name": offer["name"], "card_name": offer.get("card_name"), "coupon_name": preference.coupon_name,
                              "quantity": preference.quantity, "components": preference.component_names,
-                             "modifiers": [m.model_dump() for m in preference.modifiers],
-                             "component_modifiers": [m.model_dump() for m in preference.component_modifiers]})
+                             "modifiers": [m.model_dump(exclude_none=True) for m in preference.modifiers],
+                             "component_modifiers": [m.model_dump(exclude_none=True) for m in preference.component_modifiers]})
         if estimate is not None:
             estimate = estimate + (cents(offer["display_price_cny"]) + extra) * preference.quantity if offer.get("display_price_cny") is not None and extra is not None else None
     if estimate is not None and estimate > cents(preferences.max_amount_cny):

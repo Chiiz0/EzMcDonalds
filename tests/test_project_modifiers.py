@@ -17,6 +17,19 @@ def coffee():
             for code, name in (("111", "奶油球"), ("112", "白砂糖"))]}]}}
 
 
+def iced_coffee():
+    p = {"code": "200002", "name": "示例冰咖啡", "type": 1, "unsellable": False,
+         "modification": {"items": [{"title": "冰(单选)", "minValues": 1, "maxValues": 1, "values": [
+             {"code": "222", "name": name, "displayMode": 1, "minQuantity": 0, "maxQuantity": 1,
+              "selectedQuantity": int(key == "0-1"), "selectedKey": key, "price": 0, "soldOut": False}
+             for key, name in (("0-1", "标准"), ("0-0", "去冰"), ("0-2", "多冰"), ("1-1", "少冰"))]},
+             {"title": "浓缩(单选)", "minValues": 1, "maxValues": 1, "values": [
+                 {"code": "333", "name": name, "displayMode": 1, "minQuantity": 0, "maxQuantity": 1,
+                  "selectedQuantity": 0, "selectedKey": key, "price": price, "soldOut": True}
+                 for key, name, price in (("0-0", "不加", 0), ("0-1", "加", 500))]}]}}
+    return p
+
+
 class ModifierTests(unittest.TestCase):
     def test_default_two_free_ingredients_use_official_modification_values(self):
         self.assertEqual(cart_configuration(coffee()), {"modification": {"values": [
@@ -91,6 +104,55 @@ class ModifierTests(unittest.TestCase):
         self.assertFalse(result["standard_configuration_supported"])
         self.assertEqual(result["variants"][0]["product_code"], "900001")
         self.assertEqual(result["specifications"][0]["choices"][0]["name"], "配咖啡")
+
+    def test_single_choice_default_and_explicit_ice_keys_preserve_native_quantity(self):
+        p = iced_coffee()
+        self.assertEqual(cart_configuration(p), {"modification": {"values": [{"code": "222", "quantity": 1, "key": "0-1"}]}})
+        for key in ("0-0", "0-2", "1-1"):
+            result = selected_modification(p, [ModifierSelection(code="222", quantity=1, key=key)])
+            self.assertEqual(result["modification"]["values"], [{"code": "222", "quantity": 1, "key": key}])
+            verify_modification(result, result)
+            with self.assertRaisesRegex(EzMcdError, "not_confirmed"):
+                verify_modification(result, cart_configuration(p))
+
+    def test_inactive_sold_out_group_is_visible_but_cannot_be_submitted(self):
+        view = public_modifiers(iced_coffee())
+        self.assertTrue(view["supported"])
+        self.assertEqual(view["groups"][0]["kind"], "single_choice")
+        self.assertTrue(view["groups"][1]["inactive"])
+        self.assertEqual(view["groups"][1]["choices"][1]["extra_cny"], "5.00")
+        with self.assertRaisesRegex(EzMcdError, "exactly_once"):
+            selected_modification(iced_coffee(), [ModifierSelection(code="222", quantity=1, key="1-1"),
+                                                ModifierSelection(code="333", quantity=1, key="0-0")])
+
+    def test_single_choice_rejects_paid_sold_out_unknown_duplicate_or_zero_selections(self):
+        for values in ([{"code": "222", "quantity": 1}], [{"code": "222", "quantity": 0, "key": "0-0"}],
+                       [{"code": "222", "quantity": 1, "key": "9-9"}],
+                       [{"code": "222", "quantity": 1, "key": k} for k in ("0-0", "1-1")]):
+            with self.assertRaises(EzMcdError):
+                selected_modification(iced_coffee(), [ModifierSelection(**v) for v in values])
+        for change in ({"price": 100}, {"soldOut": True}):
+            p = iced_coffee(); p["modification"]["items"][0]["values"][3].update(change)
+            with self.assertRaisesRegex(EzMcdError, "available_free"):
+                selected_modification(p, [ModifierSelection(code="222", quantity=1, key="1-1")])
+            self.assertTrue(public_modifiers(p)["supported"])
+
+    def test_no_default_missing_or_conflicting_code_group_is_not_guessed(self):
+        for change in ("missing_default", "duplicate_default", "duplicate_key", "different_code"):
+            p = iced_coffee(); values = p["modification"]["items"][0]["values"]
+            if change == "missing_default": values[0]["selectedQuantity"] = 0
+            if change == "duplicate_default": values[1]["selectedQuantity"] = 1
+            if change == "duplicate_key": values[1]["selectedKey"] = "0-1"
+            if change == "different_code": values[1]["code"] = "444"
+            self.assertFalse(public_modifiers(p)["supported"])
+
+    def test_single_choice_and_toggle_groups_can_be_combined_without_code_collisions(self):
+        p = iced_coffee(); p["modification"]["items"].extend(coffee()["modification"]["items"])
+        result = selected_modification(p, [ModifierSelection(code="222", quantity=1, key="1-1"),
+            ModifierSelection(code="111", quantity=1), ModifierSelection(code="112", quantity=0)])
+        self.assertEqual({v["code"]: v["key"] for v in result["modification"]["values"]}, {"222": "1-1", "111": "0-1", "112": "0-0"})
+        with self.assertRaisesRegex(EzMcdError, "does_not_accept"):
+            selected_modification(coffee(), [ModifierSelection(code="111", quantity=1, key="0-1"), ModifierSelection(code="112", quantity=0)])
 
 
 if __name__ == "__main__":

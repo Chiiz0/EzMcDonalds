@@ -29,6 +29,7 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertIn("cart_add_configured", names)
                 self.assertIn("account_refresh", names)
                 self.assertIn("account_runtime_check", names)
+                self.assertTrue({"coupons_list", "coupon_products"}.issubset(names))
                 self.assertTrue(next(t for t in tools if t.name == "account_runtime_check").annotations.read_only_hint)
                 self.assertTrue({"cities_list", "stores_search", "membership_assets", "preferences_get", "preferences_save", "meal_plan"}.issubset(names))
                 refresh = next(t for t in tools if t.name == "account_refresh")
@@ -63,6 +64,9 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
                 self.assertTrue(plan["selection_ready"])
                 self.assertFalse(plan["cart_changed"])
                 request = {"account": "demo", "store_code": "9000001", "pickup_at": pickup.isoformat(), "max_amount_cny": "20.00"}
+                coupons = json.loads((await client.call_tool("coupons_list", {"request": request})).content[0].text)
+                self.assertTrue(coupons["simulation"])
+                self.assertEqual(coupons["coupons"], [])
                 detail = json.loads((await client.call_tool("product_detail", {"request": request, "product_code": "100001"})).content[0].text)
                 self.assertTrue(detail["simulation"])
                 added = json.loads((await client.call_tool("cart_add_configured", {"request": request,

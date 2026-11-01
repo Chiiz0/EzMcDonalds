@@ -15,6 +15,8 @@ READS = {
     "/bff/member/mwallet/balance": ("1006", "501"),
     "/bff/member/mwallet/token": ("1005", "501"),
     "/bff/promotion/coupons/rightCards": ("1073", "300"),
+    "/bff/promotion/coupons/menu/available": ("1074", "201"),
+    "/bff/promotion/coupons/products": ("1012", "101"),
     "/bff/store/stores/collection/list": None,
     "/bff/store/cities/group": None,
     "/bff/store/stores": ("1013", "103"),

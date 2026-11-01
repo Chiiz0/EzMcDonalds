@@ -37,6 +37,7 @@ def build_server(service):
         instructions="Use account aliases; never request credentials in chat. Read capabilities first. "
         "Use account_diagnose for setup problems; stores_search accepts city names. Saved preferences do not authorize spending. "
         "meal_plan only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
+        "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
         "Use a stable idempotency key per user purchase. "
         "After any ambiguous result query order_status; never create a replacement to retry payment. "
         "simulation=true means an offline demo, never a real order.")
@@ -51,9 +52,10 @@ def build_server(service):
             "session_refresh": "explicit account_refresh; local 24h rotation interval, no ambiguous POST retries",
             "stores": "city/name search or explicit coordinates, favorites, live pickup slots; compatible locker pickup required",
             "meal_preferences": "local saved products, components and exact-name free ingredient choices resolved against live detail; no purchase authorization or scheduling",
-            "membership_assets": "card validity and coupon category counts; actual eligibility from live menu and quote",
+            "membership_assets": "card validity and coupon category counts; coupons_list queries current store/time availability and coupon_products lists matching products",
             "products": "ordinary items and combos; product_detail also shows specification variants and matching live menu offers",
-            "combo_configuration": "explicit choices for each round; supported free binary modifiers can be kept/removed; unknown or paid modifications use the official cart",
+            "combo_configuration": "explicit round choices; supported free toggles and single choices such as ice; inactive sold-out groups omitted, paid or unknown modifications use official cart",
+            "coupon_configuration": "fresh references scoped to account/store/time; ordinary single-product coupons can be drafted and their cart echo must match; new coupon writes/payments not yet accepted",
             "runtime_maintenance": "local account runtime import, or explicit same-device-context v5 GET verification; preserves observation time; reused-context order POST and cross-day validity not yet accepted",
             "runtime_diagnostics": "account_runtime_check can inspect historical runtime on one fixed GET; never renews observation or authorizes checkout",
             "payment": "McWallet, requires local spending policy", "runtime_ttl_hours": 24,
@@ -106,7 +108,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def meal_plan(account: str | None = None, date: str | None = None) -> dict:
-        """Resolve saved preferences against live pickup slots, menu/card offers and combo choices. Returns a draft selection, not an order. Never silently substitutes unavailable items or times; date is YYYY-MM-DD in Shanghai."""
+        """Resolve saved products, named coupons and ingredient preferences against live pickup slots and choices. Returns a draft, not an order. Never silently substitutes unavailable coupons, items or times; date is YYYY-MM-DD in Shanghai."""
         return plan_meal(service, account, date)
 
     @server.tool(annotations=READ)
@@ -133,6 +135,20 @@ def build_server(service):
         """Read membership cards and coupon counts, without card numbers or credentials. Actual discount eligibility comes from the live store/time menu and checkout_quote."""
         _, provider = service.provider(account)
         return provider.assets()
+
+    @server.tool(annotations=READ)
+    @protected
+    def coupons_list(request: CheckoutInput, keyword: str = "") -> dict:
+        """Read this account's coupons for the selected pickup store/time, with availability and restrictions. Coupon references are scoped to this account, store and time; listing does not claim or use a coupon."""
+        _, provider = service.provider(request.account)
+        return provider.coupons(request, keyword)
+
+    @server.tool(annotations=READ)
+    @protected
+    def coupon_products(request: CheckoutInput, coupon_ref: str) -> dict:
+        """Recheck an available coupon and list its matching products/prices. Pass coupon_ref and offer_id to product_detail and cart_add_configured. Card benefits use existing menu card offers; special bundles require official configuration."""
+        _, provider = service.provider(request.account)
+        return provider.coupon_products(request, coupon_ref)
 
     @server.tool(annotations=READ)
     @protected
@@ -178,10 +194,10 @@ def build_server(service):
 
     @server.tool(annotations=READ)
     @protected
-    def product_detail(request: CheckoutInput, product_code: str, offer_id: str | None = None) -> dict:
+    def product_detail(request: CheckoutInput, product_code: str, offer_id: str | None = None, coupon_ref: str | None = None) -> dict:
         """Read live combo rounds, components, prices, free keep/remove modifiers and specification variants. Follow a variant's live menu_offers to its detail; modifiers use codes, not arbitrary request blobs. No cart/order mutation."""
         _, provider = service.provider(request.account)
-        return provider.product_detail(request, product_code, offer_id)
+        return provider.product_detail(request, product_code, offer_id, coupon_ref)
 
     @server.tool(annotations=READ)
     @protected
@@ -199,7 +215,7 @@ def build_server(service):
     @server.tool(annotations=CART)
     @protected
     def cart_add_configured(request: CheckoutInput, items: list[ItemSelection], idempotency_key: str) -> dict:
-        """Add selected items/combos to an EMPTY cart once. Use live offer_id and explicit round/items choices from product_detail. Standard modifiers only. Does not order or pay; call checkout_quote next."""
+        """Add selected items/combos to an EMPTY cart once. Use live offer_id, optional coupon_ref, and explicit round/items choices from product_detail. Rechecks coupon availability and verifies its cart echo. Does not order or pay; call checkout_quote next."""
         return service.add_configured_items(request, items, idempotency_key)
 
     @server.tool(annotations=READ)
