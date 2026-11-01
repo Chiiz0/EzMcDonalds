@@ -9,6 +9,7 @@ from .models import pickup_time, cents, yuan, fingerprint
 from .protocol.signing import device_update_metadata
 from .products import choose_offer, configured_product, public_detail, configurable
 from .variants import resolve_variant
+from .card_variants import matching_card, resolve_card_variant
 from .coupons import coupon_rows, choose_coupon, coupon_offers, public_coupon, public_coupon_products
 from .transport import Transport, data
 
@@ -130,9 +131,16 @@ class McdProvider:
             "cardId": offer.get("cardId") or "", "pinId": "", "date": params["date"].replace("-", ""),
             "fromCombo": False, "customization": False}))
 
+    def _card_variant_evidence(self, args, offer, daypart, params):
+        card = matching_card(self._coupons(args, daypart, params), offer)
+        raw = self.get("/bff/promotion/coupons/products", params | {"channelCode": "03",
+            "couponCode": card["code"], "couponId": card["id"], "promotionId": card["promotionId"],
+            "daypartCodes": daypart})
+        return card, raw
+
     def product_detail(self, args, product_code, offer_id=None, coupon_ref=None, variant_of=None):
         if variant_of is not None and (coupon_ref is not None or not offer_id or variant_of == product_code):
-            raise EzMcdError("variant_requires_explicit_regular_parent_offer")
+            raise EzMcdError("variant_requires_explicit_parent_offer")
         daypart, params = self.context(args)
         coupon = None
         if coupon_ref:
@@ -141,15 +149,29 @@ class McdProvider:
             menu = menu_products(self.get("/bff/spc/menu", params | {"isPromoter": "0", "daypartCodes": daypart}))
         offer = choose_offer(menu, variant_of or product_code, offer_id)
         detail = self._detail(offer, daypart, params)
+        card_evidence, card_error = None, None
+        if str(offer.get("productType")) == "3" and offer.get("cardId"):
+            try:
+                card_evidence = self._card_variant_evidence(args, offer, daypart, params)
+            except EzMcdError as error:
+                if variant_of:
+                    raise
+                card_error = error.code
         if variant_of:
-            offer, detail = resolve_variant(detail, offer, product_code)
+            offer, detail = (resolve_card_variant(detail, offer, product_code, card_evidence) if card_evidence
+                             else resolve_variant(detail, offer, product_code))
         result = public_detail(detail, offer)
+        if card_evidence:
+            result["card_name"] = card_evidence[0]["title"]
         if variant_of:
             result.update(variant_of=variant_of, display_price_cny=yuan(offer["priceInfo"]["eatInPrice"]),
-                pricing_source="regular_parent_variant_detail", optional_promotions_present=offer["_optional_promotions"],
+                pricing_source="verified_card_variant" if offer.get("_verified_card_variant") else "regular_parent_variant_detail",
+                optional_promotions_present=offer["_optional_promotions"],
                 related_products_selected=False, specification_choices=offer["_variant_specifications"],
                 configuration_base_cny=yuan(offer["_configuration_base_cents"]),
                 default_components_extra_cny=yuan(offer["priceInfo"]["eatInPrice"] - offer["_configuration_base_cents"]))
+            if offer.get("_verified_card_variant"):
+                result["regular_display_price_cny"] = yuan(offer["_regular_price_cents"])
         if coupon:
             result.update(coupon_ref=coupon_ref, coupon=public_coupon(coupon))
             if offer["_coupon_configuration_issues"]:
@@ -163,7 +185,10 @@ class McdProvider:
                 for p in menu if p["productCode"] == variant["product_code"] and str(p.get("productType")) in ("1", "7")]
             variant["parent_detail_selection"] = None
             try:
-                resolved, selected = resolve_variant(detail, offer, variant["product_code"])
+                if card_error:
+                    raise EzMcdError(card_error)
+                resolved, selected = (resolve_card_variant(detail, offer, variant["product_code"], card_evidence)
+                                      if card_evidence else resolve_variant(detail, offer, variant["product_code"]))
                 if not configurable(selected["product"]):
                     raise EzMcdError("advanced_customization_requires_official_cart")
                 variant["parent_detail_selection"] = {"product_code": variant["product_code"],
@@ -171,6 +196,9 @@ class McdProvider:
                 variant["optional_promotions_present"] = resolved["_optional_promotions"]
                 variant["specification_choices"] = resolved["_variant_specifications"]
                 variant["configuration_base_cny"] = yuan(resolved["_configuration_base_cents"])
+                if resolved.get("_verified_card_variant"):
+                    variant.update(card_name=resolved["cardName"], display_price_cny=yuan(resolved["priceInfo"]["eatInPrice"]),
+                        regular_display_price_cny=yuan(resolved["_regular_price_cents"]), pricing_source="verified_card_variant")
             except EzMcdError as error:
                 variant["parent_detail_issue"] = error.code
             variant["next_step"] = ("product_detail_with_variant_code_and_menu_offer" if variant["menu_offers"] else
@@ -188,6 +216,8 @@ class McdProvider:
             raise EzMcdError("cart_not_empty_review_before_clear")
         menu = None
         used_coupons = set()
+        variant_card_limits = {}
+        variant_product_limits = {}
         products = []
         for index, selection in enumerate(selections):
             if selection.coupon_ref:
@@ -202,8 +232,23 @@ class McdProvider:
             offer = choose_offer(offers, selection.variant_of or selection.product_code, selection.offer_id)
             detail = self._detail(offer, daypart, params)
             if selection.variant_of:
-                offer, detail = resolve_variant(detail, offer, selection.product_code)
+                evidence = self._card_variant_evidence(args, offer, daypart, params) if offer.get("cardId") else None
+                offer, detail = (resolve_card_variant(detail, offer, selection.product_code, evidence) if evidence
+                                 else resolve_variant(detail, offer, selection.product_code))
+                if evidence:
+                    card = evidence[0]
+                    limit = min(card["currentDayAvailableCount"], card["totalAvailableCount"])
+                    variant_card_limits[card["cardId"]] = min(variant_card_limits.get(card["cardId"], limit), limit)
+                    key = card["cardId"], selection.product_code
+                    variant_product_limits[key] = min(variant_product_limits.get(key, detail["maxPurchaseQuantity"]),
+                                                       detail["maxPurchaseQuantity"])
             products.append(configured_product(selection, offer, detail, index + 1))
+        for card_id, limit in variant_card_limits.items():
+            if sum(p["quantity"] for p in products if p.get("cardId") == card_id) > limit:
+                raise EzMcdError("variant_card_cart_quantity_exceeds_remaining_uses")
+        for (card_id, code), limit in variant_product_limits.items():
+            if sum(p["quantity"] for p in products if p.get("cardId") == card_id and p["code"] == code) > limit:
+                raise EzMcdError("variant_card_product_quantity_exceeds_live_limit")
         return params | {"cartType": "1", "channelCode": "03", "pinId": "", "dataSource": 1,
                          "daypartCode": daypart, "scenes": "", "products": products}
 

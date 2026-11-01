@@ -120,7 +120,21 @@ def verify_confirmation_components(product, rows):
             # Validate selected values and optional surcharges as well as labels.
             from .modifiers import configuration_signature
             configuration_signature(product)
-            expected = sorted((i["displayText"], 1) for i in items if i["values"][0]["quantity"] == 1)
+            expected = []
+            for item in items:
+                value = item["values"][0]
+                if value["quantity"] != 1:
+                    continue
+                # The observed standard-ice choice is retained structurally in
+                # the cart but has no label/confirmation row. Do not generalize
+                # a missing label to changed ice, paid or unknown modifiers.
+                if ("displayText" not in item and item.get("code") == "200002"
+                        and item.get("key") == "0-1" and item.get("name") == "冰"
+                        and value.get("code") == "1" and value.get("name") == "标准"
+                        and type(value.get("price")) is int and value["price"] == 0):
+                    continue
+                expected.append((item["displayText"], 1))
+            expected.sort()
             if any(not isinstance(name, str) or not name for name, _ in expected):
                 raise ValueError
             if any(set(i) != {"name", "quantity"} or type(i["quantity"]) is not int or i["quantity"] != 1 for i in rows):

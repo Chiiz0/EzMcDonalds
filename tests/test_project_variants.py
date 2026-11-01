@@ -152,7 +152,7 @@ class VariantTests(unittest.TestCase):
         for changes in ({"offer_id": None}, {"coupon_ref": "coupon-" + "a" * 24}, {"variant_of": "100001"}):
             with self.assertRaises(ValidationError):
                 ItemSelection.model_validate(self.selection.model_dump() | changes)
-        with self.assertRaisesRegex(EzMcdError, "explicit_regular_parent"):
+        with self.assertRaisesRegex(EzMcdError, "explicit_parent"):
             self.provider.product_detail(self.args, "100001", variant_of="G900")
 
     def test_existing_cart_intent_serialization_is_unchanged(self):

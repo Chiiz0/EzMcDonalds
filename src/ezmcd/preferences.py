@@ -319,13 +319,14 @@ def plan_meal(service, account=None, date=None):
         coupon_ref = None
         variant_of = None
         if preference.variant_of:
-            if preference.coupon_name or preferences.require_card_discount:
-                issues.append({"reason": "preferred_variant_requires_regular_parent_offer", "name": preference.name})
+            if preference.coupon_name:
+                issues.append({"reason": "preferred_variant_cannot_mix_coupon_source", "name": preference.name})
                 continue
             if menu is None:
                 menu = provider.menu(request)["products"]
             parents = {p["offer_id"]: p for p in menu if p["name"] == preference.variant_of
-                       and str(p.get("product_type")) == "3" and not p.get("card_name")}
+                       and str(p.get("product_type")) == "3"
+                       and bool(p.get("card_name")) == preferences.require_card_discount}
             if len(parents) != 1:
                 issues.append({"reason": "preferred_variant_parent_unavailable_or_ambiguous", "name": preference.variant_of})
                 continue
@@ -344,7 +345,7 @@ def plan_meal(service, account=None, date=None):
                 continue
             variant = variants[0]
             variant_of = variant["parent_detail_selection"]["variant_of"]
-            offers = [variant | {"offer_id": variant["parent_detail_selection"]["offer_id"], "card_name": None}]
+            offers = [variant | {"offer_id": variant["parent_detail_selection"]["offer_id"], "card_name": variant.get("card_name")}]
         elif preference.coupon_name:
             if preferences.require_card_discount:
                 issues.append({"reason": "explicit_coupon_conflicts_with_required_card_discount", "name": preference.name})
