@@ -5,11 +5,13 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a32`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+**当前版本 `0.1.0a33`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
 
 这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；已有 Mac 账号可用 `sampling-capture` 无订单采集运行字段，仍需操作官方 App，尚不能自动跨日更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
 前一天的加购或取餐准备结果不明时，可以[找回并结束已过时的本地意图](docs/cart.md#过了取餐时间仍有未核对记录)，再查看新餐的购物车。旧请求始终留在日志中，不会因换日或重启自动重发；结束本地意图不会清空官方购物车或取消订单。
+
+已有账号只需更新登录时，可用 `ezmcd sampling-connect personal --update --manage-app`，按终端提示进入麦钱包即可；保留原消费策略和购买日志，不延长下单运行字段。失败可从原目录只读恢复，详见[会话维护](docs/session-maintenance.md)。
 
 需要更新运行凭据时，已有 Mac 账号可用 `ezmcd sampling-capture personal --interactive --update-account`，按终端实时提示操作 App：退出 App、恢复代理后，自动核验余额和 v5 查询，再保存同会员凭据，省去手动复制样本路径。这条新采样接自动导入的流程已完成一次实机验证，新 MCP 进程也可使用更新后的凭据；仍需本人操作 App。失败可从同一目录恢复；操作步骤和验收范围见[无订单采样](docs/guarded-capture.md)。
 

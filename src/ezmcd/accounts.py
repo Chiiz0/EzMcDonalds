@@ -241,7 +241,7 @@ def _enroll(store, alias, profile, binary, runtime_sample, phone_label, *, updat
                 raise EzMcdError("sampling_account_changed_start_new_capture")
             if old["identity"] != identity:
                 raise EzMcdError("cannot_replace_alias_with_different_account")
-            if capture_receipt is not None and old.get("runtime") and (
+            if capture_receipt is not None and runtime_sample is not None and old.get("runtime") and (
                     runtime is None or runtime["observed_at"] < old["runtime"]["observed_at"]):
                 raise EzMcdError("runtime_sample_older_than_current_evidence")
             record["policy"] = old["policy"]

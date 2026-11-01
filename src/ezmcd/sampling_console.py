@@ -9,11 +9,12 @@ from .errors import EzMcdError
 
 
 class SamplingConsole:
-    def __init__(self, *, stdin=None, stderr=None, manage_app=False, balance_only=False):
+    def __init__(self, *, stdin=None, stderr=None, manage_app=False, balance_only=False, update_account=False):
         self.stdin = stdin if stdin is not None else sys.stdin
         self.stderr = stderr if stderr is not None else sys.stderr
         self.manage_app = manage_app
         self.balance_only = balance_only
+        self.update_account = update_account
 
     def say(self, text):
         print(text, file=self.stderr, flush=True)
@@ -24,7 +25,8 @@ class SamplingConsole:
         self.say("EzMcDonalds 本机凭据采样 · 账号 " + alias)
         if self.balance_only:
             self.say("现在尚未启用代理。先在 Mac 官方 App 登录你自己的会员，并确认麦钱包可正常显示。")
-            self.say("这里只连接你当前登录的账号：不接收手机号或验证码，不创建订单，不启用消费。")
+            self.say("请登录原账号的同一会员。本轮只更新会话，保留原消费策略和购买日志，不采集或延长下单运行字段。" if self.update_account else
+                     "这里只连接你当前登录的账号：不接收手机号或验证码，不创建订单，不启用消费。")
             self.say("确认并关闭其他使用麦当劳账号的窗口，避免采到另一个会话。" +
                      ("开始后工具会尝试退出和重新打开已验证版本的 App。" if self.manage_app else "然后完全退出 App。"))
             self.say("开始后最多 " + str(seconds) + " 秒，只进入麦钱包；收到签名余额样本就收尾，无需准备购物车。")
@@ -73,7 +75,8 @@ class SamplingConsole:
         elif stage == "CAPTURE_FINISHED":
             if event.get("sample_import_ready") is True and event.get("capture_state") == "complete":
                 if self.balance_only:
-                    self.say("\n[CAPTURE_FINISHED] 余额样本已校验。请继续等待最终结果；只有 account_created=true 或 already_imported=true 才表示账号接入完成。本次没有采集下单运行字段。")
+                    flag = "account_updated=true" if self.update_account else "account_created=true"
+                    self.say("\n[CAPTURE_FINISHED] 余额样本已校验。请继续等待最终结果；只有 " + flag + " 或 already_imported=true 才表示账号接入完成。本次没有采集下单运行字段。")
                 else:
                     self.say("\n[CAPTURE_FINISHED] 两个样本均已校验。若使用了 --update-account，请继续等待最终结果；只有 account_updated=true 或 already_imported=true 才表示凭据导入完成。")
             else:

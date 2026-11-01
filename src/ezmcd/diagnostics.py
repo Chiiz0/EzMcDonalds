@@ -21,6 +21,7 @@ def credentials_guide():
             "也可使用 account connect ALIAS --request-file 私有文本文件；原有 --har 入口保留。凭据不发到聊天，完成后清理复制内容及剪贴板历史。",
             "结束采样后恢复原代理；临时证书随即移除。需要重复采样的 Mac 用户可显式使用 sampling-cert 管理仅限 api.mcd.cn 的持久证书，不再需要时运行 sampling-cert remove。",
             "运行 ezmcd account check ALIAS；缺少下单运行字段时仍可找店、选餐、准备购物车与报价。",
+            "已有账号只更新会话：先在官方App登录同一会员，再在原数据目录运行 sampling-connect ALIAS --update --manage-app，只进入钱包即可。保留策略和购买日志，不延长运行字段；失败可用 sampling-import ALIAS CAPTURE_DIRECTORY --connect --update 继续。",
             "重新登录或刷新后，若 runtime_recovery_available=true，可运行 account runtime ALIAS --previous-device，或让 Agent 调用 account_runtime_restore；只读核验本人原设备的近期样本，保留原采样日期。",
             "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
             "已有 Mac 账号可在本机终端使用 sampling-capture ALIAS --interactive --update-account：准备好按回车后，按同一终端的实时中文提示操作。可加 --manage-app 处理已验证 App 的开关，页面仍由本人操作。复用受限证书、限时阻断订单，退出 App 并恢复代理后只读核验和导入。失败可用 sampling-import ALIAS CAPTURE_DIRECTORY 恢复；不通过 MCP 控制采样。",

@@ -33,7 +33,7 @@ def verify_capture_runtime(record):
         raise EzMcdError("runtime_sample_expired")
 
 
-def _capture_files(store, directory, *, connection=False):
+def _capture_files(store, directory, *, connection=False, maintenance=False):
     directory = Path(directory).expanduser().absolute()
     parent = store.root / "captures"
     if (directory.parent != parent or not re.fullmatch(r"[0-9a-f]{32}", directory.name)
@@ -47,8 +47,12 @@ def _capture_files(store, directory, *, connection=False):
         raise EzMcdError("sampling_capture_incomplete")
     config, audit, cleanup = (files[k] for k in ("config", "audit", "cleanup"))
     if connection:
-        bound = (config.get("schema_version") == 3 and config.get("purpose") == "account_connect"
-                 and config.get("identity") is None and config.get("refresh_session") is None
+        scope = (config.get("schema_version") == 4 and config.get("purpose") == "account_maintenance"
+                 and all(isinstance(config.get(k), str) and re.fullmatch(r"[0-9a-f]{64}", config[k])
+                         for k in ("identity", "account_fingerprint"))) if maintenance else (
+                     config.get("schema_version") == 3 and config.get("purpose") == "account_connect"
+                     and config.get("identity") is None)
+        bound = (scope and config.get("refresh_session") is None
                  and isinstance(config.get("alias"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", config["alias"])
                  and isinstance(config.get("binary"), str) and Path(config["binary"]).is_absolute())
     else:

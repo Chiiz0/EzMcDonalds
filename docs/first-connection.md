@@ -9,6 +9,8 @@
 - 先在 App 登录自己的会员，确认麦钱包正常显示。关闭其他使用麦当劳账号的窗口，避免采到另一个会话。项目保存采样中第一个签名和余额校验通过的会话，不凭输入的别名推断手机号归属。
 - 使用原数据目录；已有会员请维护原账号，不要用新目录绕过购买日志。别名或同一会员已经存在时，首次接入会拒绝覆盖。
 
+已有账号只想更新登录会话时，使用 `sampling-connect ALIAS --update --manage-app`，仍只需进入钱包。它要求同一会员并保留原策略和购买日志；详细行为及恢复命令见[会话维护](session-maintenance.md)。
+
 ```sh
 .venv/bin/python -m pip install -e '.[sampling]'
 .venv/bin/ezmcd sampling-cert prepare

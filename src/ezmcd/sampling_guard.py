@@ -46,9 +46,14 @@ class RuntimeGuard:
         self.output = Path(config['output'])
         self.binary = config['binary']
         self.identity = config['identity']
-        self.balance_only = config.get('purpose') == 'account_connect'
-        if self.balance_only and (config.get('schema_version') != 3 or self.identity is not None or config.get('refresh_session') is not None):
-            raise ValueError('invalid_connection_capture_scope')
+        maintenance = config.get('purpose') == 'account_maintenance'
+        self.balance_only = maintenance or config.get('purpose') == 'account_connect'
+        if self.balance_only:
+            bound = (config.get('schema_version') == 4 and isinstance(self.identity, str)
+                     and re.fullmatch(r'[0-9a-f]{64}', self.identity)) if maintenance else (
+                         config.get('schema_version') == 3 and self.identity is None)
+            if not bound or config.get('refresh_session') is not None:
+                raise ValueError('invalid_connection_capture_scope')
         self.deadline = config['deadline']
         self.clock = clock
         self.profile = None
@@ -234,7 +239,7 @@ class RuntimeGuard:
                       'response':{'status':200,'body':{'success':True}}}
             profile = profile_from_balance_sample(sample,self.binary)
             identity = fingerprint({'provider':'mcd-cn','member':profile['fields']['meddyId']})
-            if not self.balance_only and identity != self.identity:
+            if self.identity is not None and identity != self.identity:
                 raise ValueError('wrong_member')
             write_private(self.output/'balance.json',sample)
             self.profile = profile
