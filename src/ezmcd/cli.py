@@ -189,6 +189,7 @@ def main():
                         resume_command=[sys.executable, "-m", "ezmcd.cli", "--data-dir", str(store.root),
                             "sampling-import", args.alias, result["capture_directory"], "--connect"] + (["--update"] if args.update else []),
                         next_action="采样已结束，但本轮导入尚未完成。保留本目录，解决错误后可用 resume_command 只读重试；不会重新启动代理。")
+            console.finished(result)
         elif args.command == "sampling-capture":
             raise EzMcdError("sampling_runtime_capture_suspended")
         elif args.command == "sampling-import":

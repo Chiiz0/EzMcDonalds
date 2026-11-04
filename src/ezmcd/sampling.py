@@ -17,6 +17,7 @@ from .errors import EzMcdError
 from .models import fingerprint
 from .sampling_cert import SamplingCertificate
 from .sampling_local import TRANSPORT, LOCAL_MODE, PROBE_MODE
+from .sampling_diagnostics import routing_diagnostics
 from .storage import read_private, write_private, secure_directory
 
 PORT = 18089
@@ -31,6 +32,10 @@ def capture_outcome(audit):
           and audit.get("allowed_session_refreshes", 0) == 0):
         state = "no_api_requests"
         action = "窗口内未观察到 App 的 API 请求，只有本地阻断自检。不要导入或继续点提交；确认 Mac App 和联网服务准备好后，再开始新的采样窗口。"
+        diagnostics = routing_diagnostics(audit)
+        if diagnostics.get("native_connections", 0) > 0:
+            state = "native_traffic_without_api"
+            action = "已观察到本机连接，但没有可用的官方 API 请求。查看连接与 TLS 计数定位问题；不能仅凭监听器就绪判断原生采样成功，也不要通过提交订单测试。"
     elif audit.get("balance_saved") is not True:
         state = "balance_rejected" if audit.get("balance_error") else "balance_missing"
         action = "没有可用的本人余额样本。不要导入部分文件或继续提交；核对账号和余额诊断，下次必须先看到 BALANCE_CAPTURED。"
@@ -39,7 +44,7 @@ def capture_outcome(audit):
         action = "余额已校验，但未取得有效运行样本。旧凭据保持不变；不要单独导入余额来覆盖账号，需要在新的保护窗口内完成运行字段采样。"
     return {"capture_state": state, "sample_import_ready": state == "complete",
         "new_sampling_required": state != "complete", "capture_window_active": False,
-        "next_action": action}
+        "routing_diagnostics": routing_diagnostics(audit), "next_action": action}
 
 
 class RuntimeCapture:
@@ -195,6 +200,7 @@ class RuntimeCapture:
             os.fchmod(stream.fileno(), 0o600)
             stream.write(Path(__file__).with_name("_mitm_runtime_guard.py").read_bytes())
         process = None
+        seen_app = False
         stop = False
         old_signals = {}
         errors = []
@@ -241,17 +247,18 @@ class RuntimeCapture:
                 "只进入麦钱包。不要提交订单或付款；本模式不用于订单运行字段采样。"})
             if self.app is not None and time.monotonic() < stop_at:
                 self.app.start()
-            seen_app = False
             while not stop and time.monotonic() < stop_at:
                 if process.poll() is not None:
                     raise EzMcdError("sampling_guard_listener_failed")
+                running = self.app_running()
+                if running and not seen_app:
+                    seen_app = True
+                    self.report({"stage": "APP_RUNNING", "next": "已观察到麦当劳进程，请进入麦钱包。"})
                 state = read_private(self.directory / "audit.json")
                 if state.get("balance_saved"):
                     self.report({"stage": "BALANCE_CAPTURED", "seconds_remaining": 0,
                         "capture_window_active": False, "next": "余额样本已校验，正在结束本轮。"})
                     break
-                running = self.app_running()
-                seen_app = seen_app or running
                 if self.app is not None and self.app.launch_failed():
                     raise EzMcdError("sampling_managed_app_launch_failed")
                 if not running and not self.launch_pending() and (seen_app or self.app is not None):
@@ -298,6 +305,7 @@ class RuntimeCapture:
                     "effective_proxy_before": effective_before, "effective_proxy_after": effective_after,
                     "cleanup_errors": sorted(set(errors)), "official_app_closed": closed,
                     "managed_app": self.manage_app, "app_launch_pending": pending,
+                    "official_app_observed": seen_app,
                     "capture_process_stopped": process is None or process.poll() is not None,
                     "persistent_certificate_retained": True})
                 self.report({"stage": "CLEANUP_RESULT", "proxy_restored": unchanged,
@@ -318,6 +326,7 @@ class RuntimeCapture:
             "runtime_sample": None, "account_updated": False, "certificate_retained": True,
             "proxy_restored": True, "system_proxy_modified": False, "transport": TRANSPORT,
             "managed_app": self.manage_app, "native_acceptance": "pending",
+            "official_app_observed": seen_app,
             "order_requests_forwarded": 0, "payment_requests_forwarded": 0,
             "balance_error": audit.get("balance_error"), "balance_header_checks": audit.get("balance_header_checks"),
             **outcome}

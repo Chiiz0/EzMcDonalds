@@ -104,7 +104,8 @@ class SamplingConsoleTests(unittest.TestCase):
     def test_captured_evidence_does_not_claim_import_already_finished(self):
         self.console({'stage': 'CAPTURE_FINISHED', 'sample_import_ready': True, 'capture_state': 'complete'})
         self.assertIn('请继续等待最终结果', self.output.getvalue())
-        self.assertIn('account_created=true', self.output.getvalue())
+        self.assertIn('账号导入核验尚未完成', self.output.getvalue())
+        self.assertNotIn('=true', self.output.getvalue())
         self.assertNotIn('账号已更新', self.output.getvalue())
 
     def test_incomplete_capture_and_unknown_event_text_do_not_leak_diagnostics(self):

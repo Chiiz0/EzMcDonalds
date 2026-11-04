@@ -252,7 +252,9 @@ class ConnectionConsoleCliTests(unittest.TestCase):
         console({'stage':'CAPTURE_FINISHED','capture_state':'complete','sample_import_ready':True})
         text=output.getvalue()
         self.assertNotIn('提交一次',text);self.assertNotIn('准备测试购物车',text)
-        self.assertIn('account_created=true',text);self.assertIn('没有采集下单运行字段',text)
+        self.assertNotIn('=true',text);self.assertIn('没有采集下单运行字段',text)
+        console.finished({'account_created':True})
+        self.assertIn('[ACCOUNT_CONNECTED]',output.getvalue())
 
     def invoke(self,input='\n',*,complete=True,resume=False,import_error=None):
         from ezmcd.cli import main
@@ -277,9 +279,11 @@ class ConnectionConsoleCliTests(unittest.TestCase):
         code,out,capture,importer=self.invoke()
         self.assertEqual(code,0);self.assertTrue(json.loads(out)['account_created'])
         self.assertTrue(capture.call_args.kwargs['report'].balance_only)
+        self.assertIn('[ACCOUNT_CONNECTED]',capture.call_args.kwargs['report'].stderr.getvalue())
         importer.assert_called_once()
         code,out,capture,importer=self.invoke(complete=False)
         self.assertEqual(code,2);importer.assert_not_called()
+        self.assertIn('[ACCOUNT_NOT_CONFIRMED]',capture.call_args.kwargs['report'].stderr.getvalue())
 
     def test_resume_uses_only_import_without_console_proxy_or_capture(self):
         code,out,capture,importer=self.invoke(resume=True)
@@ -293,6 +297,9 @@ class ConnectionConsoleCliTests(unittest.TestCase):
             self.assertEqual(value['capture_directory'],'/synthetic/capture')
             self.assertEqual(value['resume_command'][-4:],['sampling-import','mine','/synthetic/capture','--connect'])
             self.assertNotIn('private-secret',out)
+            text=capture.call_args.kwargs['report'].stderr.getvalue()
+            self.assertIn('[ACCOUNT_NOT_CONFIRMED]',text)
+            self.assertNotIn('[ACCOUNT_CONNECTED]',text)
 
 
 if __name__=='__main__':unittest.main()

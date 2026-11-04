@@ -16,6 +16,7 @@ from ezmcd.models import fingerprint
 from ezmcd.errors import EzMcdError
 from ezmcd.storage import write_private
 from ezmcd.sampling_session import valid_credential, validate_session
+from ezmcd.sampling_diagnostics import NATIVE_COUNTERS
 
 BALANCE = '/bff/member/mwallet/balance'
 ORDER = '/bff/order/orders'
@@ -65,6 +66,32 @@ class RuntimeGuard:
         self.runtime_saved = False
         self.audit = {'blocked_requests':0, 'allowed_gets':0, 'balance_saved':False,
                       'runtime_saved':False, 'upstream_connections':0, 'last_result':'starting'}
+        if self.local_capture:
+            self.audit.update({key: 0 for key in NATIVE_COUNTERS})
+
+    def count_native(self, key, client):
+        # The regular loopback preflight must never count as native traffic.
+        if self.local_capture and getattr(getattr(client, 'proxy_mode', None), 'type_name', None) == 'local':
+            self.audit[key] = min(1000000, self.audit[key] + 1)
+            self.save_audit()
+
+    def client_connected(self, client):
+        self.count_native('native_connections', client)
+        if getattr(client, 'transport_protocol', None) == 'udp':
+            self.count_native('native_udp_connections', client)
+
+    def tls_clienthello(self, data):
+        key = 'native_tls_api' if data.client_hello.sni == 'api.mcd.cn' else 'native_tls_other'
+        self.count_native(key, data.context.client)
+
+    def tls_established_client(self, data):
+        self.count_native('native_tls_completed', data.context.client)
+
+    def tls_failed_client(self, data):
+        self.count_native('native_tls_errors', data.context.client)
+
+    def server_connect_error(self, data):
+        self.count_native('native_upstream_errors', data.client)
 
     def save_audit(self):
         write_private(self.output/'audit.json', self.audit)
@@ -103,6 +130,7 @@ class RuntimeGuard:
             if (data.server.transport_protocol != 'tcp' or not isinstance(address, tuple)
                     or len(address) != 2 or address[1] != 443
                     or (address[0] != 'api.mcd.cn' and data.server.sni != 'api.mcd.cn')):
+                self.count_native('native_destinations_blocked', getattr(data, 'client', None))
                 return
             data.server.error = previous_error
         self.audit['upstream_connections'] += 1
@@ -115,6 +143,7 @@ class RuntimeGuard:
         refresh_candidate = (self.refresh_session and not self.refresh_used and
             (req.scheme,req.host,req.port,req.method,req.path) == ('https','api.mcd.cn',443,'POST',REFRESH))
         self.block(flow, terminate=req.method != 'GET' and not refresh_candidate)
+        self.count_native('native_http_requests', getattr(flow, 'client_conn', None))
         path = urlsplit(req.path).path
         live = self.clock() <= self.deadline
         official = req.scheme == 'https' and req.host == 'api.mcd.cn' and req.port == 443

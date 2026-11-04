@@ -262,7 +262,9 @@ class MaintenanceCliTests(unittest.TestCase):
     def test_console_uses_update_success_and_preserves_policy_language(self):
         out = Terminal(); console = SamplingConsole(stdin=Terminal('\n'), stderr=out, balance_only=True, update_account=True)
         console.ready('mine', 120); console({'stage':'CAPTURE_FINISHED','sample_import_ready':True,'capture_state':'complete'})
-        self.assertIn('同一会员', out.getvalue()); self.assertIn('account_updated=true', out.getvalue())
+        self.assertIn('同一会员', out.getvalue()); self.assertNotIn('=true', out.getvalue())
+        console.finished({'account_updated':True})
+        self.assertIn('[ACCOUNT_UPDATED]',out.getvalue())
         self.assertNotIn('account_created=true', out.getvalue())
 
 if __name__ == '__main__': unittest.main()

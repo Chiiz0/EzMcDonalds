@@ -19,6 +19,18 @@ class SamplingConsole:
     def say(self, text):
         print(text, file=self.stderr, flush=True)
 
+    def finished(self, result):
+        flags = [name for name in ("account_created", "account_updated", "already_imported")
+                 if result.get(name) is True]
+        if result.get("ok") is False or len(flags) != 1:
+            self.say("\n[ACCOUNT_NOT_CONFIRMED] 本轮未确认接入或更新成功。请查看最终结果；不要把采样已就绪或余额样本已校验当作账号更新完成。")
+        elif flags[0] == "account_updated":
+            self.say("\n[ACCOUNT_UPDATED] 本轮会话更新已完成并通过核验；消费策略和购买日志保留。")
+        elif flags[0] == "account_created":
+            self.say("\n[ACCOUNT_CONNECTED] 本轮账号接入已完成并通过核验；消费默认关闭。")
+        else:
+            self.say("\n[ACCOUNT_REVERIFIED] 原导入已核验，没有重写凭据。")
+
     def ready(self, alias, seconds):
         if not self.stdin.isatty() or not self.stderr.isatty():
             raise EzMcdError("sampling_interactive_terminal_required")
@@ -49,6 +61,8 @@ class SamplingConsole:
             self.say("\n[GUARD_ACTIVE] 本机采样已就绪，阻断自检已通过；系统代理未修改。" + action + "，先进入麦钱包余额页；暂时不要提交订单。")
         elif stage == "LOCAL_CAPTURE_STARTING":
             self.say("\n[LOCAL_CAPTURE_STARTING] 等待麦当劳进程采样就绪，系统代理保持原样。可能需要 macOS 网络扩展授权；未就绪前不要打开 App。")
+        elif stage == "APP_RUNNING":
+            self.say("\n[APP_RUNNING] 已观察到麦当劳进程。请在 App 窗口进入麦钱包，等待本终端的最终结果。")
         elif stage == "BALANCE_CAPTURED":
             self.say("\n[BALANCE_CAPTURED] 余额样本已校验，本轮正在收尾。不要再提交，请退出官方 App。")
         elif stage == "CLOSE_OFFICIAL_APP_NOW":
@@ -69,8 +83,7 @@ class SamplingConsole:
         elif stage == "CAPTURE_FINISHED":
             if event.get("sample_import_ready") is True and event.get("capture_state") == "complete":
                 if self.balance_only:
-                    flag = "account_updated=true" if self.update_account else "account_created=true"
-                    self.say("\n[CAPTURE_FINISHED] 余额样本已校验。请继续等待最终结果；只有 " + flag + " 或 already_imported=true 才表示账号接入完成。本次没有采集下单运行字段。")
+                    self.say("\n[CAPTURE_FINISHED] 余额样本已校验，账号导入核验尚未完成。请继续等待最终结果。本次没有采集下单运行字段。")
                 else:
                     self.say("\n[CAPTURE_FINISHED] 两个样本均已校验。若使用了 --update-account，请继续等待最终结果；只有 account_updated=true 或 already_imported=true 才表示凭据导入完成。")
             else:

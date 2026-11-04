@@ -66,6 +66,8 @@ class SamplingTests(unittest.TestCase):
         self.capture.probe.side_effect=lambda *_:self.calls.append(['probe'])
         result=self.run_capture()
         self.assertTrue(result['managed_app']);self.assertFalse(result['system_proxy_modified'])
+        self.assertTrue(result['official_app_observed'])
+        self.assertIn('APP_RUNNING',[c.args[0]['stage'] for c in self.capture.report.call_args_list])
         self.assertLess(self.calls.index(['app-close']),self.calls.index(['probe']))
         self.assertLess(self.calls.index(['probe']),self.calls.index(['app-start']))
         self.assertEqual(app.request_close.call_count,2)
@@ -196,6 +198,17 @@ class SamplingTests(unittest.TestCase):
         result=self.run_capture()
         self.assertFalse(result['runtime_saved']);self.assertFalse(result['sample_import_ready'])
         self.assertFalse(result['account_updated']);self.assertEqual(result['native_acceptance'],'pending')
+
+    def test_pending_launcher_is_not_evidence_that_app_started(self):
+        self.managed_app()
+        write_private(self.capture.directory/'audit.json',{'runtime_saved':False,'balance_saved':False})
+        self.app.start.side_effect=lambda:None
+        self.app.launch_pending.side_effect=lambda:self.clock < 120
+        def tick(duration):self.clock+=duration
+        with patch('ezmcd.sampling.time.sleep',side_effect=tick):result=self.run_capture()
+        self.assertFalse(result['official_app_observed'])
+        self.assertFalse(read_private(self.capture.directory/'cleanup.json')['official_app_observed'])
+        self.assertNotIn('APP_RUNNING',[c.args[0]['stage'] for c in self.capture.report.call_args_list])
 
 
 class CaptureOutcomeTests(unittest.TestCase):
