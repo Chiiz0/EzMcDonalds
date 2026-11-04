@@ -6,7 +6,7 @@ import uuid
 
 from .accounts import public_account
 from .errors import EzMcdError
-from .models import CheckoutInput, ItemSelection, Policy, cents, pickup_time, yuan
+from .models import CheckoutInput, ItemSelection, Policy, cents, pickup_time, yuan, fingerprint
 from .provider import McdProvider
 from .transport import data
 
@@ -283,6 +283,8 @@ class Service:
         account, provider = self.provider(alias)
         identity = account["identity"]
         with self.store.lock(identity):
+            if fingerprint(self.store.account(alias)) != fingerprint(account):
+                raise EzMcdError("account_changed_before_checkout")
             q = self.store.quote(identity, quote_id)
             existing = self.store.existing(identity, request_key, q["intent"])
             if existing:

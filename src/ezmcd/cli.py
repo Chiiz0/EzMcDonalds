@@ -52,6 +52,11 @@ def main():
     check.add_argument("alias")
     runtime_check = account.add_parser("runtime-check", help="Check v5 runtime with one read-only request, including historical evidence; never renews it")
     runtime_check.add_argument("alias")
+    runtime_use = account.add_parser("runtime-use", help="Explicitly allow this exact observation for up to 168 hours from its original time; does not authorize spending")
+    runtime_use.add_argument("alias")
+    runtime_use_mode = runtime_use.add_mutually_exclusive_group(required=True)
+    runtime_use_mode.add_argument("--max-age-hours", type=int, help="25..168 hours from observation, not from this command; checks one GET")
+    runtime_use_mode.add_argument("--disable", action="store_true", help="Remove local historical-use authorization without networking")
     refresh = account.add_parser("refresh", help="Refresh an existing session once, or resume its read-only verification")
     refresh.add_argument("alias")
     runtime = account.add_parser("runtime", help="Update official runtime evidence without replacing login or purchase records")
@@ -229,6 +234,9 @@ def main():
             elif args.action == "runtime-check":
                 from .runtime_check import check_runtime
                 result = check_runtime(store, args.alias)
+            elif args.action == "runtime-use":
+                from .runtime_use import configure
+                result = configure(store, args.alias, args.max_age_hours)
             elif args.action == "refresh":
                 result = service.refresh_account(args.alias)
             elif args.action == "runtime":

@@ -305,6 +305,7 @@ def revoke_local(store, alias):
         record.pop("profile", None)
         record.pop("runtime", None)
         record.pop("runtime_candidate", None)
+        record.pop("runtime_use", None)
         record.pop("session_refresh", None)
         record["revoked"] = True
         record["policy"]["allow_checkout"] = False
@@ -316,6 +317,7 @@ def revoke_local(store, alias):
 
 def public_account(record, *, session_verified=False):
     from .runtime_recovery import recovery_available
+    from .runtime_use import available, view as runtime_use_view
     runtime = record.get("runtime")
     demo = record["provider"] == "demo"
     revoked = bool(record.get("revoked"))
@@ -327,7 +329,8 @@ def public_account(record, *, session_verified=False):
     session_status = ("revoked_locally" if revoked else "refresh_verification_pending" if refresh_state == "CANDIDATE"
                       else "refresh_stopped_relogin_locally" if refresh_incomplete
                       else "verified_now" if session_verified else "connected_verify_with_account_check")
-    runtime_available = bool(not revoked and runtime and 0 <= time.time() - runtime["observed_at"] <= 86400)
+    runtime_available = bool(not revoked and not refresh_incomplete and available(record, time.time()))
+    runtime_use = runtime_use_view(record, time.time())
     blockers = []
     if revoked:
         blockers.append("account_revoked")
@@ -348,7 +351,8 @@ def public_account(record, *, session_verified=False):
         "sms_login_supported": record["provider"] == "mcd-cn", "sms_login_requires_official_device_context": True,
         "runtime_available": runtime_available,
         "runtime_recovery_available": recovery_available(record, time.time()),
-        "runtime_evidence": {"maximum_observation_age_hours": 24,
+        "runtime_use": runtime_use,
+        "runtime_evidence": {"maximum_observation_age_hours": runtime_use["maximum_observation_age_hours"],
             "age_hours": round((time.time() - runtime["observed_at"]) / 3600, 2) if runtime and not revoked else None,
             "verification_scope": ("v5_order_list_get" if runtime.get("source") in ("same_official_device_readonly_verified", "previous_own_device_readonly_verified")
                                    else "official_request_reconstruction") if runtime and not revoked else None},

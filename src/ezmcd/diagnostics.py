@@ -16,7 +16,7 @@ def credentials_guide():
         "steps": [
             "运行 ezmcd doctor，检查官方客户端构建与已有账号。",
             "已有本人设备上下文：运行 ezmcd account login NEW_ALIAS --device-from EXISTING_ALIAS，在终端输入手机号和验证码。",
-            "首次接入可实验性使用 sampling-connect ALIAS：仅匹配本人Mac麦当劳可执行文件，只进入钱包，不修改系统代理；新版原生路径待验收，不要测试提交订单。需要受限证书，可能需要首次网络扩展授权。",
+            "首次接入可实验性使用 sampling-connect ALIAS：仅匹配本人Mac麦当劳可执行文件，只进入钱包，不修改系统代理；首次接入和已有账号维护已实机通过，空白机器安装未验收。不要测试提交订单。需要受限证书，可能需要首次网络扩展授权。",
             "首次导入：在官方 App 登录，用本人本地调试工具复制麦钱包余额请求为 cURL 或原始 HTTP 请求。Mac 用户在私有终端运行 ezmcd account connect ALIAS --clipboard；项目只解析，不执行复制的命令。",
             "也可使用 account connect ALIAS --request-file 私有文本文件；原有 --har 入口保留。凭据不发到聊天，完成后清理复制内容及剪贴板历史。",
             "结束采样后恢复原代理；临时证书随即移除。需要重复采样的 Mac 用户可显式使用 sampling-cert 管理仅限 api.mcd.cn 的持久证书，不再需要时运行 sampling-cert remove。",
@@ -26,6 +26,7 @@ def credentials_guide():
             "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
             "旧版 sampling-capture 因系统代理影响整机网络已停用。已有完整历史样本仍可sampling-import；缺少清理证据的失败目录不能导入。sampling-status只读报告网络状态，不修复或启动代理。",
             "同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
+            "已有当前账号运行样本时，本机用户可选择 account runtime-use ALIAS --max-age-hours HOURS（25至168，从原采样时刻计算）。先做只读核验，历史字段每次下单前再核验；MCP不能开启或延长许可，消费仍需单独授权。--disable撤销复用，不联网。超过24小时的订单POST尚未实测。",
             "不要为获取运行样本额外创建订单；同设备复用已完成一笔真实订单，长期运行字段更新仍待完成。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],
         "account_label_is_not_authentication": True, "automatic_device_initialization": False}

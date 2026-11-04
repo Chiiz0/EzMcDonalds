@@ -1,6 +1,9 @@
 """Bounded HTTPS transport: fixed origins, verified TLS, no retries/redirects."""
 import json
+from copy import deepcopy
+import hashlib
 import re
+import time
 from urllib.parse import quote, urlencode
 import urllib.error
 import urllib.request
@@ -51,6 +54,27 @@ class Transport:
         headers = self.signer.headers("GET", path, query=query, business=("1001", "202"), v5=True,
                                       historical_runtime_probe=historical)
         return self._open("GET", API + path + "?" + query, headers, None)
+
+    def prepare_order_runtime(self, body):
+        """One current read, scoped to this order body and this Transport only."""
+        from .runtime_use import active, binding, evidence_age, require_accepted
+        self.signer.historical_order_check = None
+        self.signer.runtime()
+        record = self.signer.account
+        now = time.time()
+        if evidence_age(record, now) <= 24 * 3600:
+            return False
+        if not active(record, now) or not isinstance(body, dict):
+            raise EzMcdError("runtime_use_requires_new_order_check")
+        before, grant = binding(record), deepcopy(record["runtime_use"])
+        raw = json.dumps(body, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+        require_accepted(self.verify_runtime(historical=True))
+        checked = time.time()
+        if checked < now or not active(record, checked) or binding(record) != before or record.get("runtime_use") != grant:
+            raise EzMcdError("runtime_use_requires_new_order_check")
+        self.signer.historical_order_check = {"binding": before, "authorization": grant,
+            "checked_at": checked, "body_digest": hashlib.sha256(raw).hexdigest()}
+        return True
 
     def send(self, method, path, params=None, body=None):
         if method == "GET":

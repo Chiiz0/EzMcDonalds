@@ -75,6 +75,7 @@ def refresh_account(store, alias, *, provider_factory=McdProvider, transport_fac
                 raise
 
         candidate = deepcopy(record)
+        candidate.pop("runtime_use", None)
         candidate["profile"]["fields"].update(state["candidate_fields"])
         try:
             balance = provider_factory(candidate).wallet()["balance_cents"]

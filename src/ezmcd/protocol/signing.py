@@ -5,7 +5,6 @@ from email.utils import format_datetime
 from functools import lru_cache
 import hashlib
 import hmac
-import math
 from pathlib import Path
 import secrets
 import struct
@@ -56,13 +55,13 @@ def sign_v4(headers, ak, secret, moment, method, path, query="", body=b""):
 class Signer:
     def __init__(self, account):
         self.account = account
+        self.historical_order_check = None
 
     def runtime(self, *, readonly_probe=False):
         runtime = self.account.get("runtime")
-        observed = runtime.get("observed_at") if isinstance(runtime, dict) else None
         now = time.time()
-        if (type(observed) not in (int, float) or not math.isfinite(observed)
-                or now < observed or (not readonly_probe and now - observed > 24 * 3600)):
+        from ..runtime_use import available, evidence_age
+        if evidence_age(self.account, now) is None or (not readonly_probe and not available(self.account, now)):
             raise EzMcdError("runtime_expired_reconnect_official_session")
         return ObservedRuntime(runtime["device_hex"], runtime["environment_hex"])
 
@@ -89,7 +88,17 @@ class Signer:
             headers["apiVersion"] = "2.0"
         ak, secret, digest, _ = constants(self.account["binary"])
         if v5:
-            headers["x-mcd-sign"] = encode(path, self.runtime(readonly_probe=historical_runtime_probe), milliseconds=int(now * 1000),
+            runtime = self.runtime(readonly_probe=historical_runtime_probe)
+            if not historical_runtime_probe and now - self.account["runtime"]["observed_at"] > 24 * 3600:
+                from ..runtime_use import binding
+                proof, self.historical_order_check = self.historical_order_check, None
+                if (method != "POST" or path != "/bff/order/orders" or not isinstance(proof, dict)
+                        or proof.get("binding") != binding(self.account)
+                        or proof.get("authorization") != self.account.get("runtime_use")
+                        or proof.get("body_digest") != hashlib.sha256(body).hexdigest()
+                        or not 0 <= now - proof["checked_at"] <= 60):
+                    raise EzMcdError("runtime_use_requires_new_order_check")
+            headers["x-mcd-sign"] = encode(path, runtime, milliseconds=int(now * 1000),
                 random_value=1 + secrets.randbelow(4095), counter=1, constants=digest)
         else:
             headers["x-mcd-gw-v"] = "1"

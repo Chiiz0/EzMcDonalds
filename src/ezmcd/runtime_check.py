@@ -5,6 +5,7 @@ import time
 from .errors import EzMcdError
 from .models import fingerprint
 from .transport import Transport
+from .runtime_use import available, view as runtime_use_view
 
 
 def check_runtime(store, alias, *, transport_factory=Transport, clock=time.time):
@@ -29,12 +30,15 @@ def check_runtime(store, alias, *, transport_factory=Transport, clock=time.time)
     payload = response["response"]
     accepted = (response["http_status"] == 200 and payload.get("success") is True
                 and isinstance(payload.get("data"), dict) and isinstance(payload["data"].get("list"), list))
-    return {"account": alias, "checked_at": clock(), "observation_age_hours": round((now-observed)/3600, 3),
+    checked = clock()
+    return {"account": alias, "checked_at": checked, "observation_age_hours": round((checked-observed)/3600, 3),
         "http_status": response["http_status"], "read_only_v5_verified": accepted,
         "verification_scope": "GET /bff/order/orders (first page, one item)",
-        "observation_expired_by_project_policy": now-observed > 86400,
+        "observation_expired_by_default_policy": checked-observed > 86400,
+        "observation_expired_by_project_policy": not available(record, checked),
+        "runtime_use": runtime_use_view(record, checked),
         "observation_time_changed": False, "account_changed": False,
         "checkout_authorized_by_check": False, "order_post_acceptance_verified": False,
-        "next_action": ("runtime_observation_update_still_required_before_checkout" if now-observed > 86400
+        "next_action": ("runtime_observation_update_still_required_before_checkout" if not available(record, checked)
                         else "continue_normal_quote_and_spending_checks") if accepted else "check_session_and_official_runtime_locally",
         "order_created": False, "payment_attempted": False}

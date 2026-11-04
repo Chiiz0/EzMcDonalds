@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 import json
 import re
+import time
 
 from .catalog import checkout, menu_products, public_menu, reservation_daypart, cart_items, menu_categories, membership_assets, pickup_methods
 from .errors import EzMcdError
@@ -363,6 +364,10 @@ class McdProvider:
             if (detail.get("orderStatusTitle") != "已取消"
                     and detail.get("expectPickUpTime") == pickup_time(quote["pickup_at"]).strftime("%Y-%m-%d %H:%M:%S")):
                 raise EzMcdError("existing_server_order_at_same_store_and_pickup_time")
+        from .runtime_use import evidence_age
+        age = evidence_age(self.account, time.time())
+        if age is not None and age > 24 * 3600:
+            self.http.prepare_order_runtime(quote["body"])
 
     def create_order(self, quote):
         return self.http.send("POST", "/bff/order/orders", body=quote["body"])

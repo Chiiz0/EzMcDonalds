@@ -8,6 +8,12 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "runtime_use_age_limit_invalid": ("运行字段复用期限必须为25至168小时。", "期限从原采样时刻算起，不是从授权时刻算起；可用 --disable 恢复默认24小时限制。"),
+        "runtime_use_requires_current_account_and_evidence": ("当前账号或本人设备资料不满足限期复用条件。", "先完成登录/会话恢复并核对本人设备样本；复用不能生成字段，也不能跨账号或换设备。"),
+        "runtime_use_observation_outside_limit": ("原样本已超过所选期限或时间无效。", "取得新的本人官方运行样本；不能通过重新授权或修改日期延长旧样本。"),
+        "runtime_use_readonly_check_failed": ("历史运行字段未通过本次只读签名核验。", "停止下单，核对会话及官方运行样本；此次核验不会自动刷新、重新授权或发送订单。"),
+        "runtime_use_requires_new_order_check": ("该历史字段缺少针对当前订单的即时核验。", "重新取得报价并按原消费授权继续；项目必须重新执行只读核验，不能复用上一订单或上次进程的核验结果。"),
+        "account_changed_before_checkout": ("准备下单时账号资料已变化。", "重新检查账号、消费授权和报价；没有使用旧快照继续创建订单。"),
         "unsupported_combo_group_schema": ("套餐轮次结构暂不支持，不能确定各组件的准确份数。", "重新读取商品详情；仅已核对的相同必选单项重复行可合并。其他结构请在官方 App 配置，再读取购物车核对。"),
         "sampling_runtime_capture_suspended": ("旧版下单运行字段采样已停用，避免影响整机网络。", "可导入本人已有授权样本；sampling-connect 仅提供实验性钱包会话采样，不操作购物车。请勿为采样提交订单。"),
         "sampling_local_capture_unavailable": ("麦当劳进程采样未能在限时内就绪，系统代理未修改。", "查看本机 mitmproxy 网络扩展授权与安装状态；先关闭麦当劳。不会回退到系统代理，不要测试提交。"),
