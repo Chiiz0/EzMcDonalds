@@ -8,6 +8,7 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "unsupported_combo_group_schema": ("套餐轮次结构暂不支持，不能确定各组件的准确份数。", "重新读取商品详情；仅已核对的相同必选单项重复行可合并。其他结构请在官方 App 配置，再读取购物车核对。"),
         "sampling_runtime_capture_suspended": ("旧版下单运行字段采样已停用，避免影响整机网络。", "可导入本人已有授权样本；sampling-connect 仅提供实验性钱包会话采样，不操作购物车。请勿为采样提交订单。"),
         "sampling_local_capture_unavailable": ("麦当劳进程采样未能在限时内就绪，系统代理未修改。", "查看本机 mitmproxy 网络扩展授权与安装状态；先关闭麦当劳。不会回退到系统代理，不要测试提交。"),
         "sampling_local_scope_invalid": ("本机采样范围或就绪记录不符合要求。", "本轮停止，不扩大到全部进程或系统代理；保留诊断记录，不操作购物车。"),
