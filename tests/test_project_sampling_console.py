@@ -44,8 +44,8 @@ class SamplingConsoleTests(unittest.TestCase):
 
     def test_guard_stage_only_requests_wallet_before_submission(self):
         self.console({'stage': 'GUARD_ACTIVE'})
-        self.assertIn('先进入麦钱包余额页', self.output.getvalue())
-        self.assertIn('暂时不要提交订单', self.output.getvalue())
+        self.assertIn('现在手动打开官方 App，再进入麦钱包余额页', self.output.getvalue())
+        self.assertIn('不要提交订单或付款', self.output.getvalue())
 
     def test_even_stale_runtime_events_never_invite_submission(self):
         self.console({'stage': 'BALANCE_CAPTURED', 'capture_window_active': True, 'seconds_remaining': 65})
@@ -85,7 +85,7 @@ class SamplingConsoleTests(unittest.TestCase):
         console({'stage':'CLOSE_OFFICIAL_APP_NOW'})
         console({'stage':'APP_MANUAL_CLOSE_REQUIRED','next':'secret diagnostic'})
         text=self.output.getvalue()
-        self.assertIn('工具正在打开官方 App',text)
+        self.assertIn('工具即将尝试打开官方 App；请等待 APP_RUNNING',text)
         self.assertIn('工具正在请求退出麦当劳',text)
         self.assertIn('不再保证阻断',text)
         self.assertNotIn('secret diagnostic',text)

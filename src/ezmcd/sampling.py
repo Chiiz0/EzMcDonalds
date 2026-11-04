@@ -18,6 +18,7 @@ from .models import fingerprint
 from .sampling_cert import SamplingCertificate
 from .sampling_local import TRANSPORT, LOCAL_MODE, PROBE_MODE
 from .sampling_diagnostics import routing_diagnostics
+from .sampling_dns import api_dns_snapshot
 from .storage import read_private, write_private, secure_directory
 
 PORT = 18089
@@ -168,6 +169,11 @@ class RuntimeCapture:
 
     def _run(self, account, ca, executable, refresh_session):
         self.require_scope()
+        with self.ca.server_certificate() as leaf:
+            return self._run_capture(account, ca, executable, refresh_session, leaf)
+
+    def _run_capture(self, account, ca, executable, refresh_session, leaf):
+        self.require_scope()
         before, effective_before = self.proxy_state(), self.effective_proxy()
         if (before.get("Enabled") != "No" or before.get("Authenticated Proxy Enabled") != "0"
                 or any(effective_before.get(k, "0") != "0" for k in
@@ -187,10 +193,12 @@ class RuntimeCapture:
         if self.app_running():
             raise EzMcdError("sampling_close_official_app_first")
         secure_directory(self.directory)
+        dns_snapshot = api_dns_snapshot()
         deadline = time.time() + self.seconds
         stop_at = time.monotonic() + self.seconds
         config = self.configuration(account, deadline, refresh_session) | {
-            "transport": TRANSPORT, "local_mode": LOCAL_MODE, "parent_pid": os.getpid()}
+            "transport": TRANSPORT, "local_mode": LOCAL_MODE, "parent_pid": os.getpid(),
+            "api_dns_snapshot": dns_snapshot}
         write_private(self.directory / "config.json", config)
         # Read-only snapshots: never restore over a network setting the user
         # changed while collection was running.
@@ -215,8 +223,9 @@ class RuntimeCapture:
             self.report({"stage": "LOCAL_CAPTURE_STARTING", "next":
                 "正在启动仅匹配麦当劳进程的本机采样；可能需要 macOS 网络扩展授权。未就绪前不要打开 App。"})
             process = subprocess.Popen([executable, "--mode", LOCAL_MODE, "--mode", PROBE_MODE,
+                "--certs", "api.mcd.cn=" + str(leaf),
                 "--set", f"confdir={ca}", "--set", "connection_strategy=lazy",
-                "--set", "upstream_cert=false", "--set", "rawtcp=false", "--set", "flow_detail=0",
+                "--set", "upstream_cert=false", "--set", "rawtcp=false", "--set", "http2=false", "--set", "flow_detail=0",
                 "--set", "termlog_verbosity=error", "--set", "body_size_limit=256k", "-s", str(loader)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, umask=0o077,
                 env=dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent),
@@ -319,13 +328,16 @@ class RuntimeCapture:
                     signal.signal(sig, handler)
         audit = read_private(self.directory / "audit.json")
         outcome = self.outcome(audit)
+        if not seen_app and not audit.get("balance_saved"):
+            outcome.update(capture_state="app_not_observed", sample_import_ready=False, new_sampling_required=True,
+                next_action="本轮未观察到麦当劳进程。先确认官方 App 可手动打开，再从新的本轮编号开始；不要继续沿用旧终端提示。")
         self.report({"stage": "CAPTURE_FINISHED", **outcome})
         return {"account": self.alias, "capture_directory": str(self.directory),
             "balance_saved": audit["balance_saved"], "runtime_saved": False,
             "balance_sample": str(self.directory / "balance.json") if audit["balance_saved"] else None,
             "runtime_sample": None, "account_updated": False, "certificate_retained": True,
             "proxy_restored": True, "system_proxy_modified": False, "transport": TRANSPORT,
-            "managed_app": self.manage_app, "native_acceptance": "pending",
+            "managed_app": self.manage_app, "native_acceptance": "wallet_maintenance_verified_a37",
             "official_app_observed": seen_app,
             "order_requests_forwarded": 0, "payment_requests_forwarded": 0,
             "balance_error": audit.get("balance_error"), "balance_header_checks": audit.get("balance_header_checks"),

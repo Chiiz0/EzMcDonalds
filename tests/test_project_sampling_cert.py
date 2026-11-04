@@ -6,6 +6,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from cryptography import x509
+from cryptography.hazmat.primitives import serialization
 
 from ezmcd.errors import EzMcdError
 from ezmcd.sampling_cert import SamplingCertificate, HOST, CERT, KEY
@@ -139,6 +140,32 @@ class SamplingCertificateTests(unittest.TestCase):
             self.assertEqual(directory, self.ca.directory)
             with self.assertRaisesRegex(EzMcdError, "sampling_certificate_in_use"):
                 SamplingCertificate(self.store).remove()
+
+    def test_local_leaf_has_only_exact_dns_name_and_independent_ephemeral_key(self):
+        original = (self.ca.directory / KEY).read_bytes()
+        _, root, root_key = self.ca._load()
+        with patch.object(self.ca, '_command') as command, self.ca.server_certificate() as path:
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+            material = path.read_bytes()
+            leaf, chain = x509.load_pem_x509_certificates(material)
+            self.assertEqual(chain, root)
+            leaf.verify_directly_issued_by(root)
+            self.assertEqual(list(leaf.extensions.get_extension_for_class(x509.SubjectAlternativeName).value), [x509.DNSName(HOST)])
+            self.assertFalse(leaf.extensions.get_extension_for_class(x509.BasicConstraints).value.ca)
+            self.assertLessEqual((leaf.not_valid_after_utc - leaf.not_valid_before_utc).total_seconds(), 86700)
+            key = serialization.load_pem_private_key(material, password=None)
+            self.assertEqual(key.public_key().public_numbers(), leaf.public_key().public_numbers())
+            self.assertNotEqual(key.public_key().public_numbers(), root_key.public_key().public_numbers())
+            command.assert_not_called()
+        self.assertFalse(path.parent.exists())
+        self.assertEqual((self.ca.directory / KEY).read_bytes(), original)
+
+    def test_local_leaf_is_removed_after_capture_exception(self):
+        with self.assertRaisesRegex(RuntimeError, 'capture stopped'):
+            with self.ca.server_certificate() as path:
+                raise RuntimeError('capture stopped')
+        self.assertFalse(path.parent.exists())
 
 
 if __name__ == "__main__":

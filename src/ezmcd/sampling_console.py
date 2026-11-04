@@ -4,6 +4,7 @@ This module never starts an App, touches proxies, or receives credentials.
 Machine-readable final results stay on stdout; prompts and stages use stderr.
 """
 import sys
+import re
 
 from .errors import EzMcdError
 
@@ -15,9 +16,16 @@ class SamplingConsole:
         self.manage_app = manage_app
         self.balance_only = balance_only
         self.update_account = update_account
+        self.run_id = None
 
     def say(self, text):
+        if self.run_id:
+            text = "[RUN " + self.run_id + "] " + text.lstrip()
         print(text, file=self.stderr, flush=True)
+
+    def identify(self, capture_id):
+        if isinstance(capture_id, str) and re.fullmatch(r"[0-9a-f]{32}", capture_id):
+            self.run_id = capture_id
 
     def finished(self, result):
         flags = [name for name in ("account_created", "account_updated", "already_imported")
@@ -41,7 +49,7 @@ class SamplingConsole:
         self.say("请登录原账号的同一会员。本轮只更新会话，保留原消费策略和购买日志，不采集或延长下单运行字段。" if self.update_account else
                  "这里只连接当前登录的账号：不接收手机号或验证码，不创建订单，不启用消费。")
         self.say("关闭其他麦当劳窗口。" + ("开始后工具会尝试退出和重新打开已验证版本的 App。" if self.manage_app else "然后完全退出 App。"))
-        self.say("仅匹配麦当劳进程的采样仍待实机验收，可能出现 macOS 网络扩展授权；失败会停止，不切换到系统代理。")
+        self.say("仅匹配麦当劳进程的采样已通过一次钱包维护实机验收；可能出现 macOS 网络扩展授权，失败不切换到系统代理。")
         self.say("开始后最多 " + str(seconds) + " 秒，只进入麦钱包；收到签名余额样本就收尾，无需准备购物车。")
         self.say("不要提交订单或付款，也不要测试拦截。若 App 要求登录，先结束采样，再在官方入口登录。")
         self.say("按回车开始；输入 q 或按 Ctrl-C 取消。整个窗口内直接看本终端提示，不必返回聊天逐步确认：")
@@ -57,8 +65,8 @@ class SamplingConsole:
         if stage == "APP_PREPARING":
             self.say("\n[APP_PREPARING] 正在核对并退出本人官方 App；不会修改系统代理。")
         elif stage == "GUARD_ACTIVE":
-            action = "工具正在打开官方 App" if self.manage_app else "现在打开官方 App"
-            self.say("\n[GUARD_ACTIVE] 本机采样已就绪，阻断自检已通过；系统代理未修改。" + action + "，先进入麦钱包余额页；暂时不要提交订单。")
+            action = "工具即将尝试打开官方 App；请等待 APP_RUNNING" if self.manage_app else "现在手动打开官方 App"
+            self.say("\n[GUARD_ACTIVE] 本机采样已就绪，阻断自检已通过；系统代理未修改。" + action + "，再进入麦钱包余额页。不要提交订单或付款。")
         elif stage == "LOCAL_CAPTURE_STARTING":
             self.say("\n[LOCAL_CAPTURE_STARTING] 等待麦当劳进程采样就绪，系统代理保持原样。可能需要 macOS 网络扩展授权；未就绪前不要打开 App。")
         elif stage == "APP_RUNNING":

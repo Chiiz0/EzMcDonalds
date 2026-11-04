@@ -23,7 +23,13 @@ class McdProvider:
         return data(self.http.send("GET", path, params))
 
     def wallet(self):
-        return {"balance_cents": cents(self.get("/bff/member/mwallet/balance")["balance"])}
+        result = self.get("/bff/member/mwallet/balance")
+        profile = self.account.get("profile", {})
+        if profile.get("member_source") == "balance_response" or "userId" in result:
+            if result.get("userId") != profile.get("fields", {}).get("meddyId"):
+                from .errors import EzMcdError
+                raise EzMcdError("wallet_member_mismatch")
+        return {"balance_cents": cents(result["balance"])}
 
     def assets(self):
         return membership_assets(self.get("/bff/promotion/coupons/rightCards", {"scene": "3"}))

@@ -17,7 +17,7 @@ def sampling_status(service="Wi-Fi"):
         installed = None
     result = {"transport": TRANSPORT, "process_selector": LOCAL_MODE,
         "system_proxy_modified": False, "sampler_started": False,
-        "runtime_capture_enabled": False, "native_acceptance": "pending",
+        "runtime_capture_enabled": False, "native_acceptance": "wallet_maintenance_verified_a37",
         "mitmproxy_version": installed, "network_service": service,
         "proxy_status": "unsupported_platform", "order_created": False, "payment_attempted": False}
     if platform.system() != "Darwin":

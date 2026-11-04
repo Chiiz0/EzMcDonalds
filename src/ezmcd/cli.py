@@ -178,6 +178,7 @@ def main():
             console = SamplingConsole(manage_app=args.manage_app, balance_only=True, update_account=args.update)
             capture = capture_class(store, args.alias, binary=binary, service=args.network_service,
                 seconds=args.seconds, mitmdump=args.mitmdump, report=console, manage_app=args.manage_app)
+            console.identify(capture.directory.name)
             console.ready(args.alias, args.seconds)
             result = capture.run()
             if result.get("sample_import_ready") is True:

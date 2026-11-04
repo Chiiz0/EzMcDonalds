@@ -4,6 +4,9 @@ NATIVE_COUNTERS = (
     "native_connections", "native_udp_connections", "native_tls_api",
     "native_tls_other", "native_tls_completed", "native_tls_errors",
     "native_http_requests", "native_upstream_errors", "native_destinations_blocked",
+    "native_blocked_dns", "native_blocked_udp_https", "native_blocked_other",
+    "native_dns_requests", "native_dns_answered",
+    "native_upstream_connected", "native_server_tls_completed", "native_server_tls_errors", "native_http_errors",
 )
 
 

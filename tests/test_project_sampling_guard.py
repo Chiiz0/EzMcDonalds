@@ -86,6 +86,18 @@ class GuardTests(unittest.TestCase):
         self.assertEqual((self.directory/'runtime.json').stat().st_mode&0o777,0o600)
         self.assertNotIn('balance',json.dumps(json.loads((self.directory/'balance.json').read_text())['response']))
 
+    def test_missing_member_header_uses_only_matching_response_identity(self):
+        for member in ('wrong-member','synthetic-member'):
+            evidence=sample();headers=evidence['request']['headers'];headers.pop('meddyid')
+            headers.update(sign_v4(headers,*KEYS[:2],datetime.now(timezone.utc),'GET',BALANCE))
+            flow=self.flow('GET',BALANCE,headers);self.guard.requestheaders(flow)
+            flow.response=http.Response.make(200,json.dumps({'success':True,'data':{'userId':member,'balance':'9.99'}}).encode())
+            self.guard.response(flow)
+            self.assertEqual(self.guard.audit['balance_saved'],member=='synthetic-member')
+        saved=json.loads((self.directory/'balance.json').read_text())
+        self.assertNotIn('meddyid',saved['request']['headers'])
+        self.assertEqual(saved['response']['body'],{'success':True,'data':{'userId':'synthetic-member'}})
+
     def test_missing_balance_and_repeated_writes_are_always_blocked(self):
         for path in (ORDER,'/bff/cashier/preorder','/bff/cart/carts','/unrecognized'):
             for method in ('POST','PUT','DELETE','PATCH'):

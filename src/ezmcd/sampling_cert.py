@@ -224,6 +224,37 @@ class SamplingCertificate:
             return {"removed": True, "private_key_removed": True, "proxy_changed": False}
 
     @contextmanager
+    def server_certificate(self):
+        """One DNS-only leaf for local interception; never widens CA trust.
+
+        Local-mode destinations are IP addresses. mitmproxy's default leaf
+        includes that address as a SAN, which our CA intentionally excludes.
+        An exact-host certificate avoids adding IP authority to the CA.
+        The caller holds lease() until capture and key cleanup both finish.
+        """
+        _, ca, ca_key = self._load()
+        now = datetime.now(timezone.utc)
+        if ca.not_valid_after_utc <= now + timedelta(days=1):
+            raise EzMcdError("sampling_certificate_expired")
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        cert = (x509.CertificateBuilder()
+            .subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, HOST)]))
+            .issuer_name(ca.subject).public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(now - timedelta(minutes=5)).not_valid_after(now + timedelta(days=1))
+            .add_extension(x509.BasicConstraints(ca=False, path_length=None), critical=True)
+            .add_extension(x509.SubjectAlternativeName([x509.DNSName(HOST)]), critical=False)
+            .add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
+            .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(ca_key.public_key()), critical=False)
+            .sign(ca_key, hashes.SHA256()))
+        with tempfile.TemporaryDirectory(prefix=".sampling-leaf-", dir=self.store.root) as temporary:
+            path = Path(temporary) / "api.pem"
+            _write(path, key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption()) + cert.public_bytes(serialization.Encoding.PEM)
+                + ca.public_bytes(serialization.Encoding.PEM))
+            yield path
+
+    @contextmanager
     def lease(self):
         """Hold across a local capture so revoke/replace cannot race its cleanup."""
         with self._lock():

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, nullcontext, redirect_stdout
 import io
 import json
 import sys
@@ -22,6 +22,8 @@ class SamplingTests(unittest.TestCase):
         self.root=Path(tmp.name).resolve()
         self.capture=AccountCapture(SimpleNamespace(root=self.root), 'synthetic', binary=str(self.root/'client'), report=Mock())
         self.capture.directory=self.root/'capture'
+        patcher=patch.object(self.capture.ca,'server_certificate',side_effect=lambda:nullcontext(self.root/'api.pem'))
+        patcher.start();self.addCleanup(patcher.stop)
         write_private(self.capture.directory/'audit.json', {'runtime_saved':False,'balance_saved':True})
         write_private(self.capture.directory/'transport-ready.json', {'transport':TRANSPORT,'local_mode':LOCAL_MODE,'system_proxy_modified':False})
         self.before={'Enabled':'No','Server':'127.0.0.1','Port':'9668','Authenticated Proxy Enabled':'0'}
@@ -49,6 +51,7 @@ class SamplingTests(unittest.TestCase):
                            ('command',command), ('probe',Mock()), ('app_running',lambda:self.running)]:
             patcher=patch.object(self.capture,name,value);patcher.start();self.addCleanup(patcher.stop)
         for name,value in [('subprocess.Popen',Mock(return_value=self.process)),
+                           ('api_dns_snapshot',Mock(return_value={'host':'api.mcd.cn','addresses':['192.0.2.1'],'names':['api.mcd.cn']})),
                            ('signal.signal',Mock()), ('time.sleep',tick), ('time.monotonic',lambda:self.clock)]:
             patcher=patch('ezmcd.sampling.'+name,value);patcher.start();self.addCleanup(patcher.stop)
         patcher=patch('ezmcd.sampling_app.SamplingApp',return_value=self.app);patcher.start();self.addCleanup(patcher.stop)
@@ -84,6 +87,8 @@ class SamplingTests(unittest.TestCase):
         self.assertEqual(modes,[LOCAL_MODE,PROBE_MODE])
         self.assertNotIn('--allow-hosts',args);self.assertNotIn('--ignore-hosts',args)
         self.assertIn('rawtcp=false',args)
+        self.assertIn('http2=false',args)
+        self.assertEqual(args[args.index('--certs')+1],'api.mcd.cn='+str(self.root/'api.pem'))
 
     def test_unverified_app_stops_before_listener_or_app_controls(self):
         self.app.validate.side_effect=EzMcdError('sampling_managed_app_unsupported')
@@ -197,7 +202,7 @@ class SamplingTests(unittest.TestCase):
         write_private(self.capture.directory/'audit.json', {'runtime_saved':False,'balance_saved':False})
         result=self.run_capture()
         self.assertFalse(result['runtime_saved']);self.assertFalse(result['sample_import_ready'])
-        self.assertFalse(result['account_updated']);self.assertEqual(result['native_acceptance'],'pending')
+        self.assertFalse(result['account_updated']);self.assertEqual(result['native_acceptance'],'wallet_maintenance_verified_a37')
 
     def test_pending_launcher_is_not_evidence_that_app_started(self):
         self.managed_app()
@@ -207,6 +212,7 @@ class SamplingTests(unittest.TestCase):
         def tick(duration):self.clock+=duration
         with patch('ezmcd.sampling.time.sleep',side_effect=tick):result=self.run_capture()
         self.assertFalse(result['official_app_observed'])
+        self.assertEqual(result['capture_state'],'app_not_observed')
         self.assertFalse(read_private(self.capture.directory/'cleanup.json')['official_app_observed'])
         self.assertNotIn('APP_RUNNING',[c.args[0]['stage'] for c in self.capture.report.call_args_list])
 

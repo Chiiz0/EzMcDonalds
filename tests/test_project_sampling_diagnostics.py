@@ -64,7 +64,16 @@ class NativeDiagnosticTests(unittest.TestCase):
         self.assertEqual(server.error,'EZMCD_LOCAL_DESTINATION_BLOCKED')
         self.assertEqual(self.guard.audit['native_udp_connections'],1)
         self.assertEqual(self.guard.audit['native_destinations_blocked'],1)
+        self.assertEqual(self.guard.audit['native_blocked_udp_https'],1)
         self.assertEqual(self.guard.audit['upstream_connections'],0)
+
+    def test_blocked_dns_and_other_ports_are_categorized_without_addresses(self):
+        for port,key in ((53,'native_blocked_dns'),(80,'native_blocked_other')):
+            server=SimpleNamespace(address=('private.example',port),sni=None,transport_protocol='udp',error=None)
+            self.guard.server_connect(SimpleNamespace(server=server,client=client(protocol='udp')))
+            self.assertEqual(server.error,'EZMCD_LOCAL_DESTINATION_BLOCKED')
+            self.assertEqual(self.guard.audit[key],1)
+        self.assertNotIn('private',json.dumps(self.guard.audit))
 
     def test_native_write_is_blocked_before_diagnostic_io(self):
         flow=self.flow('POST','/bff/order/orders');flow.client_conn=client()
@@ -74,10 +83,33 @@ class NativeDiagnosticTests(unittest.TestCase):
 
     def test_http_headers_are_distinct_from_connection_counters(self):
         flow=self.flow('GET','/bff/member/mwallet/balance');flow.client_conn=client()
+        flow.client_conn.sni='api.mcd.cn';flow.request.host_header='api.mcd.cn'
         self.guard.requestheaders(flow)
         self.assertIsNone(flow.response)
         self.assertEqual(self.guard.audit['native_http_requests'],1)
         self.assertEqual(self.guard.audit['allowed_gets'],1)
+
+    def test_transparent_ip_route_requires_matching_sni_and_authority(self):
+        flow=self.flow('GET','/bff/member/mwallet/balance');flow.client_conn=client()
+        flow.client_conn.sni='api.mcd.cn';flow.request.host='192.0.2.1';flow.request.host_header='api.mcd.cn:443'
+        self.guard.requestheaders(flow)
+        self.assertIsNone(flow.response);self.assertEqual(flow.request.host,'api.mcd.cn')
+
+    def test_transparent_routes_with_ambiguous_or_mismatched_identity_stay_blocked(self):
+        for sni,authority,host in (('other.example','api.mcd.cn','192.0.2.1'),
+                                   ('api.mcd.cn','other.example','192.0.2.1'),
+                                   ('api.mcd.cn',None,'192.0.2.1'),
+                                   ('api.mcd.cn','api.mcd.cn','other.example')):
+            flow=self.flow('GET','/bff/member/mwallet/balance');flow.client_conn=client()
+            flow.client_conn.sni=sni;flow.request.host_header=authority;flow.request.host=host
+            self.guard.requestheaders(flow)
+            self.assertEqual(flow.response.status_code,409);self.assertTrue(flow.killed)
+
+    def test_transparent_canonicalization_never_authorizes_a_write(self):
+        flow=self.flow('POST','/bff/order/orders');flow.client_conn=client()
+        flow.client_conn.sni='api.mcd.cn';flow.request.host='192.0.2.1';flow.request.host_header='api.mcd.cn'
+        self.guard.requestheaders(flow)
+        self.assertTrue(flow.killed);self.assertEqual(flow.response.status_code,409)
 
     def test_counter_saturation_and_legacy_audit(self):
         self.guard.audit['native_connections']=1000000
@@ -115,3 +147,11 @@ class FinalConsoleTests(unittest.TestCase):
             self.assertNotIn('=true',out.getvalue())
             self.assertNotIn('[ACCOUNT_UPDATED]',out.getvalue())
             self.assertIn('尚未完成',out.getvalue())
+
+    def test_run_identifier_links_progress_and_final_result(self):
+        out=io.StringIO();console=SamplingConsole(stderr=out,balance_only=True)
+        console.identify('a'*32)
+        console({'stage':'APP_RUNNING'});console.finished({'account_updated':True})
+        self.assertEqual(out.getvalue().count('[RUN '+'a'*32+']'),2)
+        console.identify('private-invalid\n')
+        self.assertNotIn('private-invalid',out.getvalue())

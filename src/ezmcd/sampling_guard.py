@@ -6,6 +6,7 @@ Expiry stops collection/read forwarding while the guard is alive. Public
 native capture is wallet-only; it never asks users to test order submission.
 """
 from pathlib import Path
+import ipaddress
 import json
 import re
 import time
@@ -64,6 +65,10 @@ class RuntimeGuard:
         self.refresh_flow = None
         self.session_candidate = None
         self.runtime_saved = False
+        self.dns_addresses, self.dns_names = (), set()
+        if self.local_capture and config.get('api_dns_snapshot') is not None:
+            from ezmcd.sampling_dns import parse_snapshot
+            self.dns_addresses, self.dns_names = parse_snapshot(config['api_dns_snapshot'])
         self.audit = {'blocked_requests':0, 'allowed_gets':0, 'balance_saved':False,
                       'runtime_saved':False, 'upstream_connections':0, 'last_result':'starting'}
         if self.local_capture:
@@ -93,8 +98,47 @@ class RuntimeGuard:
     def server_connect_error(self, data):
         self.count_native('native_upstream_errors', data.client)
 
+    def server_connected(self, data):
+        self.count_native('native_upstream_connected', data.client)
+
+    def tls_established_server(self, data):
+        self.count_native('native_server_tls_completed', data.context.client)
+
+    def tls_failed_server(self, data):
+        self.count_native('native_server_tls_errors', data.context.client)
+
+    def error(self, flow):
+        self.count_native('native_http_errors', flow.client_conn)
+
     def save_audit(self):
         write_private(self.output/'audit.json', self.audit)
+
+    async def dns_request(self, flow):
+        """Answer only api.mcd.cn address lookups locally; never relay DNS."""
+        from mitmproxy import dns
+        request = flow.request
+        # Keep a refusal attached even if parsing, lookup or audit I/O fails.
+        flow.response = request.fail(dns.response_codes.REFUSED)
+        if not self.local_capture:
+            return
+        self.count_native('native_dns_requests', flow.client_conn)
+        if (self.clock() > self.deadline or not request.query or request.op_code != dns.op_codes.QUERY
+                or len(request.questions) != 1):
+            return
+        question = request.questions[0]
+        if (question.class_ != dns.classes.IN or question.type not in (dns.types.A, dns.types.AAAA, dns.types.HTTPS)):
+            return
+        try:
+            if self.clock() > self.deadline or question.name.lower().removesuffix('.') not in self.dns_names:
+                return
+            version = 4 if question.type == dns.types.A else 6
+            answers = [dns.ResourceRecord(name=question.name, type=question.type, class_=question.class_,
+                ttl=30, data=address.packed) for address in self.dns_addresses
+                if question.type != dns.types.HTTPS and address.version == version]
+            self.count_native('native_dns_answered', flow.client_conn)
+            flow.response = request.succeed(answers)
+        except (OSError, ValueError, IndexError, TypeError, TimeoutError):
+            flow.response = request.fail(dns.response_codes.SERVFAIL)
 
     def running(self):
         self.audit['last_result'] = 'ready'
@@ -131,7 +175,17 @@ class RuntimeGuard:
                     or len(address) != 2 or address[1] != 443
                     or (address[0] != 'api.mcd.cn' and data.server.sni != 'api.mcd.cn')):
                 self.count_native('native_destinations_blocked', getattr(data, 'client', None))
+                port = address[1] if isinstance(address, tuple) and len(address) == 2 else None
+                category = ('native_blocked_dns' if port == 53 else 'native_blocked_udp_https'
+                            if data.server.transport_protocol == 'udp' and port == 443 else 'native_blocked_other')
+                self.count_native(category, getattr(data, 'client', None))
                 return
+            if self.dns_addresses:
+                # Pin only the verified API route; no resolver calls inside the
+                # redirector, where macOS can attribute DNS to the original App.
+                address = next((a for a in self.dns_addresses if a.version == 4), self.dns_addresses[0])
+                data.server.address = (str(address), 443)
+                data.server.sni = 'api.mcd.cn'
             data.server.error = previous_error
         self.audit['upstream_connections'] += 1
         self.save_audit()
@@ -147,6 +201,19 @@ class RuntimeGuard:
         path = urlsplit(req.path).path
         live = self.clock() <= self.deadline
         official = req.scheme == 'https' and req.host == 'api.mcd.cn' and req.port == 443
+        client = getattr(flow, 'client_conn', None)
+        if self.local_capture and getattr(getattr(client, 'proxy_mode', None), 'type_name', None) == 'local':
+            # Transparent mode sets request.host to the destination IP. Require
+            # both TLS SNI and HTTP authority before canonicalizing that route.
+            official = (req.scheme == 'https' and req.port == 443 and client.sni == 'api.mcd.cn'
+                        and getattr(req, 'host_header', None) in ('api.mcd.cn', 'api.mcd.cn:443'))
+            if official and req.host != 'api.mcd.cn':
+                try:
+                    ipaddress.ip_address(req.host)
+                except ValueError:
+                    official = False
+            if official:
+                req.host = 'api.mcd.cn'
         if refresh_candidate and live:
             try:
                 headers=self.headers(req,{'sid','token'})
@@ -273,11 +340,14 @@ class RuntimeGuard:
             payload = json.loads(flow.response.content)
             if not isinstance(payload,dict) or payload.get('success') is not True:
                 raise ValueError('balance_not_successful')
-            # Keep only the necessary request headers. Discard account balance,
-            # response body, cookies and every request body.
+            # Preserve only membership from the successful response when the
+            # official client omits its meddyid header; never invent a header.
+            response_body = {'success': True}
+            if isinstance(payload.get('data'), dict) and 'userId' in payload['data']:
+                response_body['data'] = {'userId': payload['data']['userId']}
             sample = {'request':{'method':'GET','host':'api.mcd.cn','path':BALANCE,
                       'headers':self.headers(req,HEADER_NAMES),'body':''},
-                      'response':{'status':200,'body':{'success':True}}}
+                      'response':{'status':200,'body':response_body}}
             profile = profile_from_balance_sample(sample,self.binary)
             identity = fingerprint({'provider':'mcd-cn','member':profile['fields']['meddyId']})
             if self.identity is not None and identity != self.identity:
@@ -292,7 +362,7 @@ class RuntimeGuard:
         except Exception as error:
             self.audit['last_result'] = 'balance_rejected'
             known={'successful_balance_sample_required','official_session_headers_incomplete',
-                   'invalid_official_sample_signature','official_client_build_not_supported',
+                   'invalid_official_sample_signature','official_client_build_not_supported','official_member_identity_mismatch',
                    'wrong_member','invalid_headers','balance_not_successful','balance_response_invalid'}
             self.audit['balance_error'] = str(error) if str(error) in known else type(error).__name__
         self.save_audit()
