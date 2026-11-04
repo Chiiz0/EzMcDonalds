@@ -43,7 +43,7 @@ class AccountMaintenanceCapture(AccountCapture):
     def outcome(self, audit):
         result = super().outcome(audit) | {"capture_purpose": "account_maintenance", "account_updated": False}
         if result["sample_import_ready"]:
-            result["next_action"] = "本人余额样本已核验，代理清理后可更新会话；不采集或延长下单运行字段，保留消费策略和日志。"
+            result["next_action"] = "本人余额样本已核验，采样停止且清理校验通过后可更新会话；不采集或延长下单运行字段，保留消费策略和日志。"
         return result
 
 

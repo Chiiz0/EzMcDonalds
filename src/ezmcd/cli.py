@@ -21,20 +21,22 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     certificate = commands.add_parser("sampling-cert", help="Manage an explicit local macOS sampling certificate; never enables a proxy")
     certificate.add_argument("certificate_action", choices=("prepare", "install", "status", "remove"))
-    sampling = commands.add_parser("sampling-capture", help="Explicit macOS request-side capture; blocks orders and restores proxy after McdApp closes")
+    status_parser = commands.add_parser("sampling-status", help="Read-only proxy/sampling diagnosis; never starts capture or changes settings")
+    status_parser.add_argument("--network-service", default="Wi-Fi")
+    sampling = commands.add_parser("sampling-capture", help="Suspended: legacy order-side capture is disabled; use existing sample import")
     sampling.add_argument("alias")
     sampling.add_argument("--network-service", default="Wi-Fi")
     sampling.add_argument("--seconds", type=int, default=120)
     sampling.add_argument("--mitmdump", help="Path to your installed mitmdump; otherwise uses PATH")
     sampling.add_argument("--refresh-from", help="Private recent signed balance sample for one matching native session refresh")
-    sampling.add_argument("--update-account", action="store_true", help="After proxy cleanup, verify and atomically import this capture for the same member")
+    sampling.add_argument("--update-account", action="store_true", help="Legacy option retained for compatibility; capture is suspended")
     sampling.add_argument("--interactive", action="store_true", help="Wait for Enter in a local terminal, then show live human-readable steps on stderr; final JSON stays on stdout")
-    sampling.add_argument("--manage-app", action="store_true", help="Close the verified official App before capture, open it after guard checks and request exit before proxy restoration; no UI automation")
-    first_connection = commands.add_parser("sampling-connect", help="Interactive account connection or same-member maintenance from your logged-in Mac App wallet; blocks all mutations")
+    sampling.add_argument("--manage-app", action="store_true", help="Legacy option; order-side capture is suspended")
+    first_connection = commands.add_parser("sampling-connect", help="Experimental app-scoped wallet connection/maintenance; never changes system proxy settings")
     first_connection.add_argument("alias")
     first_connection.add_argument("--binary", help="Supported official binary; maintenance defaults to the existing account's binary")
     first_connection.add_argument("--update", action="store_true", help="Update the same existing member using only the wallet; preserves policy and purchase journal")
-    first_connection.add_argument("--network-service", default="Wi-Fi")
+    first_connection.add_argument("--network-service", default="Wi-Fi", help="Network service to inspect read-only; never changes proxy settings")
     first_connection.add_argument("--seconds", type=int, default=120)
     first_connection.add_argument("--mitmdump")
     first_connection.add_argument("--manage-app", action="store_true")
@@ -158,6 +160,9 @@ def main():
         if args.command == "sampling-cert":
             from .sampling_cert import SamplingCertificate
             result = getattr(SamplingCertificate(store), args.certificate_action)()
+        elif args.command == "sampling-status":
+            from .sampling_status import sampling_status
+            result = sampling_status(args.network_service)
         elif args.command == "sampling-connect":
             from .sampling_connect import AccountCapture, import_connection, require_new_alias
             from .sampling_console import SamplingConsole
@@ -185,22 +190,7 @@ def main():
                             "sampling-import", args.alias, result["capture_directory"], "--connect"] + (["--update"] if args.update else []),
                         next_action="采样已结束，但本轮导入尚未完成。保留本目录，解决错误后可用 resume_command 只读重试；不会重新启动代理。")
         elif args.command == "sampling-capture":
-            from .sampling import RuntimeCapture
-            console = None
-            if args.interactive:
-                from .sampling_console import SamplingConsole
-                record = store.account(args.alias)
-                if record.get("revoked") or record["provider"] != "mcd-cn":
-                    raise EzMcdError("active_official_account_required_for_runtime_update")
-                console = SamplingConsole(manage_app=args.manage_app)
-            capture = RuntimeCapture(store, args.alias, service=args.network_service, seconds=args.seconds,
-                mitmdump=args.mitmdump, refresh_from=args.refresh_from, report=console, manage_app=args.manage_app)
-            if console:
-                console.ready(args.alias, args.seconds)
-            result = capture.run()
-            if args.update_account and result.get("runtime_saved") and result.get("balance_saved"):
-                from .sampling_import import import_capture
-                result |= import_capture(store, args.alias, result["capture_directory"])
+            raise EzMcdError("sampling_runtime_capture_suspended")
         elif args.command == "sampling-import":
             if args.update:
                 from .sampling_maintenance import import_maintenance

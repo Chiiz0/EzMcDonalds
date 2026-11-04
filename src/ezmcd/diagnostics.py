@@ -16,7 +16,7 @@ def credentials_guide():
         "steps": [
             "运行 ezmcd doctor，检查官方客户端构建与已有账号。",
             "已有本人设备上下文：运行 ezmcd account login NEW_ALIAS --device-from EXISTING_ALIAS，在终端输入手机号和验证码。",
-            "首次接入也可尝试 sampling-connect ALIAS：先在支持的Mac官方App登录，在本机终端按步骤只进入麦钱包；全程阻断写请求，代理恢复后核验并保存，消费默认关闭且不含运行字段。需要本人受限采样证书；一个已有会员的新App采样、自动开关、代理恢复及首次导入已实测，用户仍需进入钱包。",
+            "首次接入可实验性使用 sampling-connect ALIAS：仅匹配本人Mac麦当劳可执行文件，只进入钱包，不修改系统代理；新版原生路径待验收，不要测试提交订单。需要受限证书，可能需要首次网络扩展授权。",
             "首次导入：在官方 App 登录，用本人本地调试工具复制麦钱包余额请求为 cURL 或原始 HTTP 请求。Mac 用户在私有终端运行 ezmcd account connect ALIAS --clipboard；项目只解析，不执行复制的命令。",
             "也可使用 account connect ALIAS --request-file 私有文本文件；原有 --har 入口保留。凭据不发到聊天，完成后清理复制内容及剪贴板历史。",
             "结束采样后恢复原代理；临时证书随即移除。需要重复采样的 Mac 用户可显式使用 sampling-cert 管理仅限 api.mcd.cn 的持久证书，不再需要时运行 sampling-cert remove。",
@@ -24,7 +24,7 @@ def credentials_guide():
             "已有账号只更新会话：先在官方App登录同一会员，再在原数据目录运行 sampling-connect ALIAS --update --manage-app，只进入钱包即可。保留策略和购买日志，不延长运行字段；失败可用 sampling-import ALIAS CAPTURE_DIRECTORY --connect --update 继续。",
             "重新登录或刷新后，若 runtime_recovery_available=true，可运行 account runtime ALIAS --previous-device，或让 Agent 调用 account_runtime_restore；只读核验本人原设备的近期样本，保留原采样日期。",
             "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
-            "已有 Mac 账号可在本机终端使用 sampling-capture ALIAS --interactive --update-account：准备好按回车后，按同一终端的实时中文提示操作。可加 --manage-app 处理已验证 App 的开关，页面仍由本人操作。复用受限证书、限时阻断订单，退出 App 并恢复代理后只读核验和导入。失败可用 sampling-import ALIAS CAPTURE_DIRECTORY 恢复；不通过 MCP 控制采样。",
+            "旧版 sampling-capture 因系统代理影响整机网络已停用。已有完整历史样本仍可sampling-import；缺少清理证据的失败目录不能导入。sampling-status只读报告网络状态，不修复或启动代理。",
             "同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
             "不要为获取运行样本额外创建订单；同设备复用已完成一笔真实订单，长期运行字段更新仍待完成。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],

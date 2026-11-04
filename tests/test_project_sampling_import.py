@@ -257,16 +257,16 @@ class CaptureImportTests(unittest.TestCase):
             self.assertEqual(result['account_updated'], updated)
             self.assertNotIn('synthetic-session', output.getvalue())
 
-    def test_cli_capture_updates_only_after_completed_capture(self):
+    def test_suspended_cli_capture_never_imports_even_if_a_mock_claims_success(self):
         argv = ['ezmcd', '--data-dir', str(self.store.root), 'sampling-capture', 'mine', '--update-account']
         for complete in (False, True):
             with patch.object(sys, 'argv', argv), patch('ezmcd.sampling.RuntimeCapture') as capture, \
                     patch('ezmcd.sampling_import.import_capture', return_value={'account_updated': True}) as importer, \
-                    redirect_stdout(io.StringIO()):
+                    redirect_stdout(io.StringIO()), patch('sys.stderr',io.StringIO()):
                 capture.return_value.run.return_value = {'runtime_saved': complete, 'balance_saved': complete,
                     'account_updated': False, 'capture_directory': str(self.directory)}
-                self.assertEqual(main(), 0 if complete else 2)
-                self.assertEqual(importer.call_count, int(complete))
+                self.assertEqual(main(), 2)
+                capture.assert_not_called();importer.assert_not_called()
 
     def test_concurrent_change_before_commit_is_not_overwritten(self):
         from ezmcd.accounts import _enroll

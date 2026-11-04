@@ -1,7 +1,6 @@
-"""Explicit, bounded macOS capture. Never exposes OS proxy control to MCP."""
+"""Bounded app-scoped wallet capture; no system proxy mutation or runtime capture."""
 import http.client
 import json
-import math
 import os
 from pathlib import Path
 import platform
@@ -17,6 +16,7 @@ from .accounts import profile_from_balance_sample
 from .errors import EzMcdError
 from .models import fingerprint
 from .sampling_cert import SamplingCertificate
+from .sampling_local import TRANSPORT, LOCAL_MODE, PROBE_MODE
 from .storage import read_private, write_private, secure_directory
 
 PORT = 18089
@@ -69,7 +69,7 @@ class RuntimeCapture:
         except EzMcdError:
             self.app_close_failed = True
             self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED",
-                "next": "未能安全退出官方 App，请手动退出；代理阻断保持到 App 与启动器均已结束。"})
+                "next": "未能安全退出官方 App，请手动退出；本轮会限时停止，请不要在 App 内提交或付款。"})
 
     def launch_pending(self):
         return self.app is not None and self.app.launch_pending()
@@ -115,6 +115,10 @@ class RuntimeCapture:
         if audit["blocked_requests"] != 1 or audit["upstream_connections"] != 0:
             raise EzMcdError("sampling_guard_preflight_failed")
 
+    def require_scope(self):
+        if not self.balance_only:
+            raise EzMcdError("sampling_runtime_capture_suspended")
+
     def executable_path(self):
         if platform.system() != "Darwin":
             raise EzMcdError("sampling_certificate_macos_required")
@@ -125,6 +129,7 @@ class RuntimeCapture:
         return str(Path(executable).absolute())
 
     def run(self):
+        self.require_scope()
         executable = self.executable_path()
         account = self.store.account(self.alias)
         if account.get("revoked") or account["provider"] != "mcd-cn":
@@ -157,17 +162,18 @@ class RuntimeCapture:
         return capture_outcome(audit)
 
     def _run(self, account, ca, executable, refresh_session):
+        self.require_scope()
         before, effective_before = self.proxy_state(), self.effective_proxy()
         if (before.get("Enabled") != "No" or before.get("Authenticated Proxy Enabled") != "0"
-                or not before.get("Server") or not before.get("Port", "").isdigit()
                 or any(effective_before.get(k, "0") != "0" for k in
                        ("HTTPEnable", "HTTPSEnable", "SOCKSEnable", "ProxyAutoConfigEnable", "ProxyAutoDiscoveryEnable"))):
             raise EzMcdError("sampling_existing_proxy_requires_review")
+        from .sampling_app import SamplingApp
+        verified_app = SamplingApp(account["binary"])
+        verified_app.validate()
         if self.manage_app:
-            from .sampling_app import SamplingApp
-            self.app = SamplingApp(account["binary"])
-            self.app.validate()
-            self.report({"stage": "APP_PREPARING", "next": "正在核对并退出本人官方 App，尚未启用代理。"})
+            self.app = verified_app
+            self.report({"stage": "APP_PREPARING", "next": "正在核对并退出本人官方 App；不会修改系统代理。"})
             self.app.request_close()
             for _ in range(20):
                 if not self.app_running():
@@ -177,16 +183,19 @@ class RuntimeCapture:
             raise EzMcdError("sampling_close_official_app_first")
         secure_directory(self.directory)
         deadline = time.time() + self.seconds
-        write_private(self.directory / "config.json", self.configuration(account, deadline, refresh_session))
+        stop_at = time.monotonic() + self.seconds
+        config = self.configuration(account, deadline, refresh_session) | {
+            "transport": TRANSPORT, "local_mode": LOCAL_MODE, "parent_pid": os.getpid()}
+        write_private(self.directory / "config.json", config)
+        # Read-only snapshots: never restore over a network setting the user
+        # changed while collection was running.
         write_private(self.directory / "proxy-before.json", {"service": self.service, "proxy": before})
-        # mitmdump watches its script for changes. Pin a private loader for this
-        # run so an editable install or package upgrade cannot unload the guard.
         loader = self.directory / "addon.py"
         with loader.open("xb") as stream:
             os.fchmod(stream.fileno(), 0o600)
             stream.write(Path(__file__).with_name("_mitm_runtime_guard.py").read_bytes())
         process = None
-        touched, stop = False, False
+        stop = False
         old_signals = {}
         errors = []
 
@@ -197,107 +206,102 @@ class RuntimeCapture:
         try:
             for sig in (signal.SIGINT, signal.SIGTERM):
                 old_signals[sig] = signal.signal(sig, interrupted)
-            # Discard proxy logs rather than retaining arbitrary upstream error
-            # strings. Sanitized audit.json is the diagnostic surface.
-            process = subprocess.Popen([executable, "--listen-host", "127.0.0.1", "--listen-port", str(PORT),
-                "--set", f"confdir={ca}", "--allow-hosts", r"^api\.mcd\.cn(?::443)?$",
-                "--set", "connection_strategy=lazy", "--set", "upstream_cert=false", "--set", "flow_detail=0",
-                "--set", "termlog_verbosity=error", "--set", "body_size_limit=256k",
-                "-s", str(loader)],
+            self.report({"stage": "LOCAL_CAPTURE_STARTING", "next":
+                "正在启动仅匹配麦当劳进程的本机采样；可能需要 macOS 网络扩展授权。未就绪前不要打开 App。"})
+            process = subprocess.Popen([executable, "--mode", LOCAL_MODE, "--mode", PROBE_MODE,
+                "--set", f"confdir={ca}", "--set", "connection_strategy=lazy",
+                "--set", "upstream_cert=false", "--set", "rawtcp=false", "--set", "flow_detail=0",
+                "--set", "termlog_verbosity=error", "--set", "body_size_limit=256k", "-s", str(loader)],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, umask=0o077,
                 env=dict(os.environ, PYTHONPATH=str(Path(__file__).resolve().parent.parent),
                          EZMCD_RUNTIME_GUARD_CONFIG=str(self.directory / "config.json")))
+            # Allow a bounded startup window for the native extension. No
+            # fallback to system HTTPS, PAC, SOCKS, DNS, routes or firewall.
             for _ in range(100):
+                if stop:
+                    raise EzMcdError("sampling_cancelled_before_start")
                 if process.poll() is not None:
-                    raise EzMcdError("sampling_guard_listener_failed")
-                if (self.directory / "audit.json").exists():
+                    raise EzMcdError("sampling_local_capture_unavailable")
+                ready_path = self.directory / "transport-ready.json"
+                if ready_path.exists() and (self.directory / "audit.json").exists():
+                    if read_private(ready_path) != {"transport": TRANSPORT, "local_mode": LOCAL_MODE,
+                                                   "system_proxy_modified": False}:
+                        raise EzMcdError("sampling_local_scope_invalid")
                     break
-                time.sleep(.05)
+                time.sleep(.1)
             else:
-                raise EzMcdError("sampling_guard_listener_failed")
+                raise EzMcdError("sampling_local_capture_unavailable")
             self.probe(ca / "mitmproxy-ca-cert.pem")
             if self.app_running() or self.proxy_state() != before or self.effective_proxy() != effective_before:
                 raise EzMcdError("sampling_environment_changed")
             if stop:
                 raise EzMcdError("sampling_cancelled_before_start")
-            touched = True
-            self.command(["/usr/sbin/networksetup", "-setsecurewebproxy", self.service, "127.0.0.1", str(PORT)])
-            self.command(["/usr/sbin/networksetup", "-setsecurewebproxystate", self.service, "on"])
-            effective = self.effective_proxy()
-            if (effective.get("HTTPSEnable"), effective.get("HTTPSProxy"), effective.get("HTTPSPort")) != ("1", "127.0.0.1", str(PORT)):
-                raise EzMcdError("sampling_effective_proxy_mismatch")
-            self.report({"stage": "GUARD_ACTIVE", "seconds": self.seconds,
-                "next": ("工具正在打开官方 App。" if self.app is not None else "现在启动官方 App。") +
-                        ("只进入麦钱包余额页，收到样本后立即收尾；不要操作购物车或登录。" if self.balance_only else
-                         "先打开麦钱包余额，再操作已准备的购物车。订单会被本地阻断；见无订单采样指引。")})
-            if self.app is not None and not stop and time.time() <= deadline:
+            self.report({"stage": "GUARD_ACTIVE", "seconds": max(0, int(stop_at - time.monotonic())),
+                "transport": TRANSPORT, "system_proxy_modified": False, "next":
+                "只进入麦钱包。不要提交订单或付款；本模式不用于订单运行字段采样。"})
+            if self.app is not None and time.monotonic() < stop_at:
                 self.app.start()
-            while not self.app_running() and not stop and time.time() <= deadline:
+            seen_app = False
+            while not stop and time.monotonic() < stop_at:
                 if process.poll() is not None:
                     raise EzMcdError("sampling_guard_listener_failed")
+                state = read_private(self.directory / "audit.json")
+                if state.get("balance_saved"):
+                    self.report({"stage": "BALANCE_CAPTURED", "seconds_remaining": 0,
+                        "capture_window_active": False, "next": "余额样本已校验，正在结束本轮。"})
+                    break
+                running = self.app_running()
+                seen_app = seen_app or running
                 if self.app is not None and self.app.launch_failed():
                     raise EzMcdError("sampling_managed_app_launch_failed")
-                if self.app is not None and not self.launch_pending():
+                if not running and not self.launch_pending() and (seen_app or self.app is not None):
                     break
-                time.sleep(.25)
-            warned = balance_announced = False
-            close_requested_at = None
-            while self.app_running() or self.launch_pending():
-                state = read_private(self.directory / "audit.json")
-                if state["balance_saved"] and not balance_announced:
-                    seconds_remaining = max(0, math.ceil(deadline - time.time()))
-                    active = bool(not self.balance_only and seconds_remaining and not stop and not state["runtime_saved"] and process.poll() is None)
-                    self.report({"stage": "BALANCE_CAPTURED", "seconds_remaining": seconds_remaining,
-                        "capture_window_active": active,
-                        "next": "本人余额样本已校验。可在当前保护窗口内进入确认页；提交请求会被阻断。" if active
-                                else "余额样本已校验，本轮正在收尾。不要继续提交；请退出官方 App。"})
-                    balance_announced = True
-                if (stop or time.time() > deadline or self.completed(state) or process.poll() is not None) and not warned:
-                    self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next":
-                        ("工具正在请求退出麦当劳；失败时需手动处理。" if self.app is not None else "请退出麦当劳；若卡住，只强制退出麦当劳。") + "关闭后才恢复代理。"})
-                    warned = True
-                    close_requested_at = time.monotonic()
-                if warned and self.app is not None:
-                    self.close_managed_app()
-                    if not self.app_close_failed and time.monotonic() - close_requested_at > 5:
-                        self.app_close_failed = True
-                        self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED", "next": "App 或启动器尚未退出，请手动关闭麦当劳；代理阻断保持。"})
-                time.sleep(.25)
+                time.sleep(.1)
         finally:
             try:
-                if touched:
-                    if self.app_running() or self.launch_pending():
-                        self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next": "代理仍在阻断。请先退出麦当劳，再等待清理完成。"})
-                    close_requested_at = time.monotonic()
-                    while self.app_running() or self.launch_pending():
+                closed, pending = False, True
+                try:
+                    self.report({"stage": "CLOSE_OFFICIAL_APP_NOW", "next": "采样结束，请退出麦当劳。系统代理未被修改。"})
+                    # A stuck App or failed state query must not prevent the
+                    # owned capture child from being stopped.
+                    for _ in range(20):
+                        if not self.app_running() and not self.launch_pending():
+                            break
                         self.close_managed_app()
-                        if self.app is not None and not self.app_close_failed and time.monotonic() - close_requested_at > 5:
-                            self.app_close_failed = True
-                            self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED", "next": "App 或启动器尚未退出，请手动关闭麦当劳；代理阻断保持。"})
                         time.sleep(.25)
-                    for args in (["-setsecurewebproxystate", self.service, "off"],
-                                 ["-setsecurewebproxy", self.service, before["Server"], before["Port"]],
-                                 ["-setsecurewebproxystate", self.service, "off"]):
+                    closed, pending = not self.app_running(), self.launch_pending()
+                    if not closed or pending:
+                        errors.append("official_app_still_running")
+                        self.report({"stage": "APP_MANUAL_CLOSE_REQUIRED", "next":
+                            "请手动退出麦当劳。本轮采样停止，不再提供阻断；不要提交订单或付款。"})
+                except (EzMcdError, OSError, subprocess.TimeoutExpired):
+                    errors.append("app_cleanup_unconfirmed")
+                finally:
+                    if process and process.poll() is None:
+                        process.terminate()
                         try:
-                            if self.command(["/usr/sbin/networksetup", *args], check=False).returncode:
-                                errors.append("proxy_restoration")
-                        except (OSError, subprocess.TimeoutExpired):
-                            errors.append("proxy_restoration")
-                if process and process.poll() is None:
-                    process.terminate()
-                    try:
-                        process.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        process.kill()
-                        process.wait(timeout=5)
-                after = self.proxy_state()
-                if after != before:
-                    errors.append("proxy_verification")
-                write_private(self.directory / "cleanup.json", {"proxy_before": before, "proxy_after": after,
-                    "cleanup_errors": sorted(set(errors)), "official_app_closed": not self.app_running(),
-                    "managed_app": self.manage_app, "app_launch_pending": self.launch_pending(),
+                            process.wait(timeout=5)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=5)
+                try:
+                    after, effective_after = self.proxy_state(), self.effective_proxy()
+                except (EzMcdError, OSError, subprocess.TimeoutExpired):
+                    after, effective_after = None, None
+                    errors.append("system_proxy_state_unreadable")
+                unchanged = after == before and effective_after == effective_before
+                if not unchanged:
+                    errors.append("system_proxy_changed_externally")
+                write_private(self.directory / "cleanup.json", {"transport": TRANSPORT,
+                    "system_proxy_modified": False, "system_proxy_unchanged": unchanged,
+                    "proxy_before": before, "proxy_after": after,
+                    "effective_proxy_before": effective_before, "effective_proxy_after": effective_after,
+                    "cleanup_errors": sorted(set(errors)), "official_app_closed": closed,
+                    "managed_app": self.manage_app, "app_launch_pending": pending,
+                    "capture_process_stopped": process is None or process.poll() is not None,
                     "persistent_certificate_retained": True})
-                self.report({"stage": "CLEANUP_RESULT", "proxy_restored": after == before,
+                self.report({"stage": "CLEANUP_RESULT", "proxy_restored": unchanged,
+                    "system_proxy_modified": False, "system_proxy_unchanged": unchanged,
                     "persistent_certificate_retained": True, "errors": sorted(set(errors)),
                     "capture_directory": str(self.directory)})
                 if errors:
@@ -309,11 +313,11 @@ class RuntimeCapture:
         outcome = self.outcome(audit)
         self.report({"stage": "CAPTURE_FINISHED", **outcome})
         return {"account": self.alias, "capture_directory": str(self.directory),
-            "balance_saved": audit["balance_saved"], "runtime_saved": audit["runtime_saved"],
+            "balance_saved": audit["balance_saved"], "runtime_saved": False,
             "balance_sample": str(self.directory / "balance.json") if audit["balance_saved"] else None,
-            "runtime_sample": str(self.directory / "runtime.json") if audit["runtime_saved"] else None,
-            "account_updated": False, "certificate_retained": True, "proxy_restored": True,
-            "managed_app": self.manage_app,
+            "runtime_sample": None, "account_updated": False, "certificate_retained": True,
+            "proxy_restored": True, "system_proxy_modified": False, "transport": TRANSPORT,
+            "managed_app": self.manage_app, "native_acceptance": "pending",
             "order_requests_forwarded": 0, "payment_requests_forwarded": 0,
             "balance_error": audit.get("balance_error"), "balance_header_checks": audit.get("balance_header_checks"),
             **outcome}

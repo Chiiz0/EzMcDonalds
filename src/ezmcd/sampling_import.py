@@ -64,6 +64,16 @@ def _capture_files(store, directory, *, connection=False, maintenance=False):
             or type(audit.get("blocked_requests")) is not int or audit["blocked_requests"] < (1 if connection else 2)):
         raise EzMcdError("sampling_capture_incomplete")
     before, after = cleanup.get("proxy_before"), cleanup.get("proxy_after")
+    if config.get("transport") is not None:
+        from .sampling_local import TRANSPORT, LOCAL_MODE
+        if (not connection or config["transport"] != TRANSPORT or config.get("local_mode") != LOCAL_MODE
+                or cleanup.get("transport") != TRANSPORT
+                or cleanup.get("system_proxy_modified") is not False
+                or cleanup.get("system_proxy_unchanged") is not True
+                or cleanup.get("capture_process_stopped") is not True
+                or not isinstance(cleanup.get("effective_proxy_before"), dict)
+                or cleanup["effective_proxy_before"] != cleanup.get("effective_proxy_after")):
+            raise EzMcdError("sampling_cleanup_needs_attention")
     if (cleanup.get("official_app_closed") is not True or cleanup.get("cleanup_errors") != []
             or cleanup.get("app_launch_pending", False) is not False
             or not isinstance(before, dict) or before.get("Enabled") != "No" or before != after):

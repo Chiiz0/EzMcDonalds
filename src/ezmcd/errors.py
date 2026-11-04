@@ -8,6 +8,9 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "sampling_runtime_capture_suspended": ("旧版下单运行字段采样已停用，避免影响整机网络。", "可导入本人已有授权样本；sampling-connect 仅提供实验性钱包会话采样，不操作购物车。请勿为采样提交订单。"),
+        "sampling_local_capture_unavailable": ("麦当劳进程采样未能在限时内就绪，系统代理未修改。", "查看本机 mitmproxy 网络扩展授权与安装状态；先关闭麦当劳。不会回退到系统代理，不要测试提交。"),
+        "sampling_local_scope_invalid": ("本机采样范围或就绪记录不符合要求。", "本轮停止，不扩大到全部进程或系统代理；保留诊断记录，不操作购物车。"),
         "select_one_available_supported_modifier_choice": ("未选中一个可售且已支持的配料选项。", "重新查看实时商品详情，按组选择准确的key；收费加料须有明确加价，不能用免费选项代替用户选择或忽略费用。"),
         "modifier_choice_unavailable": ("所选可选配料已售罄。", "重新读取 product_detail；不要自动取消用户要求的换奶或其他选择后继续购买。"),
         "variant_combo_schema_or_price_changed": ("该套餐规格的轮次、默认份数或价格公式不符合已支持结构。", "重新读取父商品详情；不要猜测加价或把规格展示价再叠加默认饮品费用。此时可在官方 App 配置后核对购物车。"),
@@ -58,11 +61,11 @@ def error_result(code):
         "sampling_close_official_app_first": ("官方 App 仍在运行。", "先退出麦当劳清除旧连接；若正常退出卡住，只强制退出麦当劳，再启动采样。"),
         "sampling_effective_proxy_mismatch": ("选定网络服务的代理没有实际生效。", "已进入恢复流程。核对当前联网服务名称，不继续操作官方 App 的提交按钮。"),
         "sampling_guard_preflight_failed": ("本地拦截自检未通过。", "本轮不会启用系统代理；检查 mitmproxy 安装与监听端口，不继续采样。"),
-        "sampling_guard_listener_failed": ("本地拦截程序未正常启动或已停止。", "先关闭麦当劳并等待代理恢复，再检查 mitmproxy 12.3.1、端口和采样审计文件。"),
+        "sampling_guard_listener_failed": ("本地拦截程序未正常启动或已停止。", "先关闭麦当劳；新版系统代理未修改。检查 mitmproxy 12.3.1、网络扩展、端口和采样审计文件。"),
         "sampling_environment_changed": ("采样准备期间 App 或代理状态发生变化。", "本轮未启动正式采样；关闭麦当劳并核对代理后重新准备。"),
-        "sampling_cleanup_needs_attention": ("采样结束，但代理恢复未全部通过。", "保持麦当劳关闭，按本次 capture_directory 内 proxy-before.json 恢复该网络服务的 HTTPS 代理；证书仍保留。"),
+        "sampling_cleanup_needs_attention": ("采样清理未全部通过。", "先关闭麦当劳，查看 cleanup.json；新版不会修改或自动恢复系统代理。旧版故障可在系统网络设置关闭遗留的本机代理；不要覆盖你自己后来修改的配置。"),
         "sampling_member_mismatch": ("登录维护样本与选择的会员不一致。", "使用该会员自己的近期余额样本，不混合不同账号或手工改写请求头。"),
-        "sampling_system_command_failed": ("macOS 没有完成代理操作。", "先关闭麦当劳，核对本轮 cleanup.json 和网络代理状态；不要继续提交或付款。"),
+        "sampling_system_command_failed": ("macOS 状态查询或采样操作未完成。", "先关闭麦当劳，核对本轮 cleanup.json 和网络代理状态；不要继续提交或付款。"),
         "sampling_app_state_unreadable": ("无法确认麦当劳进程是否已退出。", "保持代理阻断，手动确认麦当劳已关闭后再恢复网络；不要直接放行等待中的请求。"),
         "sampling_certificate_macos_required": ("系统证书管理目前只支持 macOS。", "其他系统继续使用本人调试工具管理证书；本项目未更改系统信任。"),
         "sampling_certificate_keychain_unreadable": ("无法确认登录钥匙串中的证书状态。", "解锁本人登录钥匙串后重试；项目未把查询失败视为证书不存在。"),

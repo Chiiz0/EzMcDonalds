@@ -5,17 +5,15 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a34`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+**当前版本 `0.1.0a35`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
 
-这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；已有 Mac 账号可用 `sampling-capture` 无订单采集运行字段，仍需操作官方 App，尚不能自动跨日更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
+这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；旧版 `sampling-capture` 因系统代理影响整机网络已停用；已有样本可继续导入，运行字段尚不能自动跨日更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
 
 前一天的加购或取餐准备结果不明时，可以[找回并结束已过时的本地意图](docs/cart.md#过了取餐时间仍有未核对记录)，再查看新餐的购物车。旧请求始终留在日志中，不会因换日或重启自动重发；结束本地意图不会清空官方购物车或取消订单。
 
-已有账号只需更新登录时，可用 `ezmcd sampling-connect personal --update --manage-app`，按终端提示进入麦钱包即可；保留原消费策略和购买日志，不延长下单运行字段。失败可从原目录只读恢复，详见[会话维护](docs/session-maintenance.md)。
+**采样网络修复（a35）：项目不再启用或恢复系统代理。** `sampling-connect` 改用仅匹配麦当劳可执行文件的本机采样，新增 `sampling-status` 只读诊断；环境不支持时停止，不回退到系统代理。App 退出卡住时限时结束，子进程在父进程消失或超时后自行停止。新路径只有隔离测试证据，**官方 App 实机采样尚未验收**，不把旧版成功记录算作新版通过。
 
-需要更新运行凭据时，已有 Mac 账号可用 `ezmcd sampling-capture personal --interactive --update-account`，按终端实时提示操作 App：退出 App、恢复代理后，自动核验余额和 v5 查询，再保存同会员凭据，省去手动复制样本路径。这条新采样接自动导入的流程已完成一次实机验证，新 MCP 进程也可使用更新后的凭据；仍需本人操作 App。失败可从同一目录恢复；操作步骤和验收范围见[无订单采样](docs/guarded-capture.md)。
-
-加 `--manage-app` 可让工具处理已验证官方 App 的打开和退出，减少准备步骤；钱包和购物车页面仍由本人操作。启动延迟或退出失败时保留阻断，确认 App 和本轮启动器均结束后才恢复代理。
+已有账号可实验性使用 `ezmcd sampling-connect personal --update --manage-app`，只进入麦钱包。可能需要首次授权 mitmproxy 的 macOS 网络扩展；不要操作购物车或付款。原消费策略和购买日志保留。旧版下单运行字段采样已关闭，详情见[采样状态及替代入口](docs/guarded-capture.md)。
 
 重复让 Agent 准备同一餐时，`meal_plan` 会先找本地的原购买记录，直接返回原订单或待核对尝试。即使登录过期，也无需先重新登录才能找回；不会重新选餐、加购或购买。官方最新状态仍由 `order_status` 单独核验，详见[偏好与选餐方案](docs/meal-planning.md)。
 
@@ -44,11 +42,11 @@ python3 -m venv .venv
 
 Agent 也可用 `official_orders_list` / `official_order_detail` 查看官方账号订单及取餐详情，包括未记入本项目日志的订单。回执丢失时可只读比对原尝试的部分字段，完整说明见[订单查询](docs/orders.md)。
 
-[获取自己的凭据](docs/credentials.md) · [无订单更新运行字段](docs/guarded-capture.md) · [偏好与选餐方案](docs/meal-planning.md) · [会话维护](docs/session-maintenance.md)
+[获取自己的凭据](docs/credentials.md) · [采样状态及替代入口](docs/guarded-capture.md) · [偏好与选餐方案](docs/meal-planning.md) · [会话维护](docs/session-maintenance.md)
 
 ## 连接自己的账号
 
-已有 Mac 会员可尝试项目内的首次接入引导：安装采样依赖和本人受限证书后，运行 `ezmcd sampling-connect personal --manage-app`。在本机终端按回车，只需进入官方 App 的麦钱包；代理恢复后保存账号，消费默认关闭。已在一个已有会员上实测新的 App 采样、自动开关、代理恢复、首次接入及重复导入，原账号与购买记录不变。步骤、限制和恢复方式见[首次接入引导](docs/first-connection.md)。
+已有 Mac 会员可实验性使用 `ezmcd sampling-connect personal --manage-app`，只进入官方 App 的麦钱包；系统代理保持原样，采样结束后核验并保存账号，消费默认关闭。新版按进程采样仍待实机验收，步骤与恢复方式见[首次接入引导](docs/first-connection.md)。
 
 先在官方 App 登录自己的手机号，再按[接入文档](docs/onboarding.md)准备本地采样。Mac 用户可复制一条余额请求后运行下面命令，无需整理 HAR；也可保留原有文件导入方式。命令验证签名、查询当前余额，仅保存必要会话字段。手机号标签不是认证凭据。
 

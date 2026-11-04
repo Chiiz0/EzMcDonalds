@@ -2,8 +2,8 @@
 
 Blocks financial/cart mutations before body forwarding, including retries.
 An allowlist of API GETs and an optional single matching session refresh pass.
-Expiry stops collection/read forwarding but keeps the block in place until the
-official App has been closed and the operator explicitly removes the proxy.
+Expiry stops collection/read forwarding while the guard is alive. Public
+native capture is wallet-only; it never asks users to test order submission.
 """
 from pathlib import Path
 import json
@@ -44,6 +44,7 @@ READS.update({'/bff/order/confirmation/validationinfo', '/bff/order/confirmation
 class RuntimeGuard:
     def __init__(self, config, *, clock=time.time):
         self.output = Path(config['output'])
+        self.local_capture = config.get('transport') == 'local-app-v1'
         self.binary = config['binary']
         self.identity = config['identity']
         maintenance = config.get('purpose') == 'account_maintenance'
@@ -93,6 +94,17 @@ class RuntimeGuard:
             self.block(flow)
 
     def server_connect(self, data):
+        # Local capture has no CONNECT tunnel. Never let ignored TLS, raw TCP
+        # or UDP traffic become an unguarded route to wallet/payment hosts.
+        if self.local_capture:
+            previous_error = data.server.error
+            data.server.error = 'EZMCD_LOCAL_DESTINATION_BLOCKED'
+            address = data.server.address
+            if (data.server.transport_protocol != 'tcp' or not isinstance(address, tuple)
+                    or len(address) != 2 or address[1] != 443
+                    or (address[0] != 'api.mcd.cn' and data.server.sni != 'api.mcd.cn')):
+                return
+            data.server.error = previous_error
         self.audit['upstream_connections'] += 1
         self.save_audit()
 

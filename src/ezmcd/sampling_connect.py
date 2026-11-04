@@ -60,7 +60,7 @@ class AccountCapture(RuntimeCapture):
         result = capture_outcome(audit)
         if audit.get("balance_saved") is True:
             result.update(capture_state="complete", sample_import_ready=True, new_sampling_required=False,
-                next_action="余额请求已核验，代理清理后可导入新账号。没有采集下单运行字段，也未授权消费。")
+                next_action="余额请求已核验，采样停止且清理校验通过后可导入新账号。没有采集下单运行字段，也未授权消费。")
         return result | {"capture_purpose": "account_connect", "runtime_collected": False,
                          "account_created": False}
 
