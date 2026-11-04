@@ -49,7 +49,7 @@ class SamplingConsole:
         self.say("请登录原账号的同一会员。本轮只更新会话，保留原消费策略和购买日志，不采集或延长下单运行字段。" if self.update_account else
                  "这里只连接当前登录的账号：不接收手机号或验证码，不创建订单，不启用消费。")
         self.say("关闭其他麦当劳窗口。" + ("开始后工具会尝试退出和重新打开已验证版本的 App。" if self.manage_app else "然后完全退出 App。"))
-        self.say("仅匹配麦当劳进程的采样已通过一次钱包维护实机验收；可能出现 macOS 网络扩展授权，失败不切换到系统代理。")
+        self.say("仅匹配麦当劳进程的采样已通过首次接入和钱包维护实机验收；可能出现 macOS 网络扩展授权，失败不切换到系统代理。")
         self.say("开始后最多 " + str(seconds) + " 秒，只进入麦钱包；收到签名余额样本就收尾，无需准备购物车。")
         self.say("不要提交订单或付款，也不要测试拦截。若 App 要求登录，先结束采样，再在官方入口登录。")
         self.say("按回车开始；输入 q 或按 Ctrl-C 取消。整个窗口内直接看本终端提示，不必返回聊天逐步确认：")
@@ -73,6 +73,8 @@ class SamplingConsole:
             self.say("\n[APP_RUNNING] 已观察到麦当劳进程。请在 App 窗口进入麦钱包，等待本终端的最终结果。")
         elif stage == "BALANCE_CAPTURED":
             self.say("\n[BALANCE_CAPTURED] 余额样本已校验，本轮正在收尾。不要再提交，请退出官方 App。")
+        elif stage == "OFFICIAL_REFRESH_BLOCKED":
+            self.say("\n[OFFICIAL_REFRESH_BLOCKED] 官方 App 请求刷新会话，已被本模式阻断且尚无余额样本，正在收尾。请等待 CLEANUP_RESULT 确认清理完成，再在正常网络下打开官方 App，确认钱包能显示余额后重新启动采样。不要在当前窗口重试登录、提交或付款。")
         elif stage == "CLOSE_OFFICIAL_APP_NOW":
             action = "工具正在请求退出麦当劳。" if self.manage_app else "请立即退出麦当劳。"
             self.say("\n[CLOSE_OFFICIAL_APP_NOW] 窗口结束。" + action + "退出失败也会限时停止采样；不要提交订单或付款。")

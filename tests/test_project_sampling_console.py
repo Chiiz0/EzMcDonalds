@@ -52,6 +52,13 @@ class SamplingConsoleTests(unittest.TestCase):
         self.assertNotIn('提交一次', self.output.getvalue())
         self.assertIn('本轮正在收尾', self.output.getvalue())
 
+    def test_refresh_blocked_prompt_requires_cleanup_before_official_recovery(self):
+        self.console({'stage':'OFFICIAL_REFRESH_BLOCKED','next':'private-session'})
+        text=self.output.getvalue()
+        self.assertIn('等待 CLEANUP_RESULT 确认清理完成',text)
+        self.assertIn('正常网络',text);self.assertIn('不要在当前窗口重试',text)
+        self.assertNotIn('private-session',text)
+
     def test_runtime_preparation_is_suspended_without_reading_input(self):
         with self.assertRaisesRegex(EzMcdError,'runtime_capture_suspended'):
             SamplingConsole(stdin=self.input,stderr=self.output).ready('synthetic',120)

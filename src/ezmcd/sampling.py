@@ -24,11 +24,21 @@ from .storage import read_private, write_private, secure_directory
 PORT = 18089
 
 
+def blocked_official_refresh(audit):
+    routes = audit.get("blocked_routes")
+    count = routes.get("POST /bff/passport/login/session/refresh") if isinstance(routes, dict) else None
+    return (audit.get("balance_saved") is not True and not audit.get("balance_error")
+            and type(count) is int and count > 0)
+
+
 def capture_outcome(audit):
     """Explain a finished capture; the synthetic blocked probe is not App traffic."""
     if audit.get("balance_saved") is True and audit.get("runtime_saved") is True:
         state = "complete"
         action = "两个样本已校验。核对官方订单、余额和测试购物车后，可用 sampling-import 导入此采样目录；本轮未授权消费。"
+    elif blocked_official_refresh(audit):
+        state = "official_refresh_blocked"
+        action = "观察到官方 App 的会话刷新请求被本模式阻断，尚未取得余额样本。确认本轮清理完成后，在正常网络下打开官方 App 并确认麦钱包能显示余额，再手动启动新一轮采样；不要重复提交或重试旧刷新令牌。"
     elif (audit.get("balance_saved") is not True and audit.get("allowed_gets", 0) == 0 and audit.get("blocked_requests", 0) <= 1
           and audit.get("allowed_session_refreshes", 0) == 0):
         state = "no_api_requests"
@@ -268,6 +278,10 @@ class RuntimeCapture:
                     self.report({"stage": "BALANCE_CAPTURED", "seconds_remaining": 0,
                         "capture_window_active": False, "next": "余额样本已校验，正在结束本轮。"})
                     break
+                if blocked_official_refresh(state):
+                    self.report({"stage": "OFFICIAL_REFRESH_BLOCKED", "next":
+                        "已阻断官方刷新且尚无余额样本，正在结束采样；清理完成后先在官方 App 确认钱包可用。"})
+                    break
                 if self.app is not None and self.app.launch_failed():
                     raise EzMcdError("sampling_managed_app_launch_failed")
                 if not running and not self.launch_pending() and (seen_app or self.app is not None):
@@ -337,7 +351,7 @@ class RuntimeCapture:
             "balance_sample": str(self.directory / "balance.json") if audit["balance_saved"] else None,
             "runtime_sample": None, "account_updated": False, "certificate_retained": True,
             "proxy_restored": True, "system_proxy_modified": False, "transport": TRANSPORT,
-            "managed_app": self.manage_app, "native_acceptance": "wallet_maintenance_verified_a37",
+            "managed_app": self.manage_app, "native_acceptance": "wallet_connection_and_maintenance_verified_a39",
             "official_app_observed": seen_app,
             "order_requests_forwarded": 0, "payment_requests_forwarded": 0,
             "balance_error": audit.get("balance_error"), "balance_header_checks": audit.get("balance_header_checks"),

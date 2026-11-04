@@ -5,7 +5,9 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a38`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+**当前版本 `0.1.0a39`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+
+a39 已完成“已登录官方 App → 首次采样接入 → 新 MCP 进程核验”的实机链路。若采样中官方 App 请求刷新会话且还没有余额样本，会收尾并明确提示先在正常网络下恢复钱包；不会自动重试刷新。
 
 a38 支持一种重复展开的必选套餐轮次，按每个组件的总份数生成选择；真实 MCP 已验证十翅组合的 ¥49.90 取餐柜报价、预算拒绝、重启去重及清空，没有购买。详情见[套餐组件数量](docs/products.md#套餐组件数量与偏好)。
 
@@ -50,7 +52,7 @@ Agent 也可用 `official_orders_list` / `official_order_detail` 查看官方账
 
 ## 连接自己的账号
 
-已有 Mac 会员可实验性使用 `ezmcd sampling-connect personal --manage-app`，只进入官方 App 的麦钱包；系统代理保持原样，采样结束后核验并保存账号，消费默认关闭。已有账号维护已实测通过；首次创建账号的新传输实测仍待完成，步骤与恢复方式见[首次接入引导](docs/first-connection.md)。
+已有 Mac 会员可实验性使用 `ezmcd sampling-connect personal --manage-app`，只进入官方 App 的麦钱包；系统代理保持原样，采样结束后核验并保存账号，消费默认关闭。已有账号维护和首次创建项目账号均已实测通过；首次接入使用隔离空目录，复用已授权证书与扩展，步骤与恢复方式见[首次接入引导](docs/first-connection.md)。
 
 先在官方 App 登录自己的手机号，再按[接入文档](docs/onboarding.md)准备本地采样。Mac 用户可复制一条余额请求后运行下面命令，无需整理 HAR；也可保留原有文件导入方式。命令验证签名、查询当前余额，仅保存必要会话字段。手机号标签不是认证凭据。
 

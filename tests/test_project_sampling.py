@@ -202,7 +202,30 @@ class SamplingTests(unittest.TestCase):
         write_private(self.capture.directory/'audit.json', {'runtime_saved':False,'balance_saved':False})
         result=self.run_capture()
         self.assertFalse(result['runtime_saved']);self.assertFalse(result['sample_import_ready'])
-        self.assertFalse(result['account_updated']);self.assertEqual(result['native_acceptance'],'wallet_maintenance_verified_a37')
+        self.assertFalse(result['account_updated']);self.assertEqual(result['native_acceptance'],'wallet_connection_and_maintenance_verified_a39')
+
+    def test_blocked_official_refresh_stops_before_timeout_and_still_cleans_up(self):
+        self.managed_app()
+        write_private(self.capture.directory/'audit.json',{'runtime_saved':False,'balance_saved':False,
+            'blocked_routes':{'POST /bff/passport/login/session/refresh':1}})
+        result=self.run_capture()
+        self.assertEqual(result['capture_state'],'official_refresh_blocked')
+        self.assertFalse(result['sample_import_ready']);self.assertFalse(result['account_created'])
+        stages=[call.args[0]['stage'] for call in self.capture.report.call_args_list]
+        self.assertLess(stages.index('OFFICIAL_REFRESH_BLOCKED'),stages.index('CLEANUP_RESULT'))
+        self.assertLess(self.clock,10)
+        cleanup=read_private(self.capture.directory/'cleanup.json')
+        self.assertTrue(cleanup['official_app_closed']);self.assertTrue(cleanup['capture_process_stopped'])
+        self.assertTrue(cleanup['system_proxy_unchanged'])
+        self.assertEqual(self.app.start.call_count,1)
+
+    def test_valid_balance_wins_over_an_earlier_blocked_refresh(self):
+        self.managed_app()
+        write_private(self.capture.directory/'audit.json',{'runtime_saved':False,'balance_saved':True,
+            'blocked_routes':{'POST /bff/passport/login/session/refresh':1}})
+        result=self.run_capture()
+        self.assertEqual(result['capture_state'],'complete');self.assertTrue(result['sample_import_ready'])
+        self.assertNotIn('OFFICIAL_REFRESH_BLOCKED',[call.args[0]['stage'] for call in self.capture.report.call_args_list])
 
     def test_pending_launcher_is_not_evidence_that_app_started(self):
         self.managed_app()
@@ -218,6 +241,21 @@ class SamplingTests(unittest.TestCase):
 
 
 class CaptureOutcomeTests(unittest.TestCase):
+    def test_only_exact_observed_refresh_with_valid_count_changes_recovery_guidance(self):
+        for routes in (None, [], {'POST /other':1}, {'GET /bff/passport/login/session/refresh':1},
+                       *({'POST /bff/passport/login/session/refresh':v} for v in (True,False,0,-1,'private-secret'))):
+            result=capture_outcome({'allowed_gets':1,'blocked_routes':routes})
+            self.assertEqual(result['capture_state'],'balance_missing')
+            self.assertNotIn('private-secret',json.dumps(result))
+        result=capture_outcome({'allowed_gets':1,'blocked_routes':{'POST /bff/passport/login/session/refresh':1}})
+        self.assertEqual(result['capture_state'],'official_refresh_blocked')
+        self.assertFalse(result['sample_import_ready']);self.assertTrue(result['new_sampling_required'])
+        self.assertIn('正常网络',result['next_action'])
+        rejected=capture_outcome({'allowed_gets':1,'balance_error':'wrong_member',
+            'blocked_routes':{'POST /bff/passport/login/session/refresh':1}})
+        self.assertEqual(rejected['capture_state'],'balance_rejected')
+        self.assertFalse(rejected['sample_import_ready'])
+
     def test_probe_rejection_is_not_an_official_app_request(self):
         result=capture_outcome({'blocked_requests':1,'allowed_gets':0,'last_result':'runtime_rejected',
             'balance_saved':False,'runtime_saved':False})
