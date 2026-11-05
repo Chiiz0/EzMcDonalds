@@ -19,6 +19,16 @@ ezmcd status personal RETURNED_ATTEMPT_ID
 
 如果实时查询返回 `PAID`，但 `pickup_code_pending=true`，表示已核验付款、取餐码尚未生成；临近取餐时再查询同一订单。`UNKNOWN` 表示尚未核对清楚，不能当成付款失败。没有 `order_id` 的未知尝试可以用下方官方查询工具找候选订单，或在 App 核对；项目不会猜测订单关联或自动补购。取消状态也不会自动释放购买额度或删除去重记录。
 
+## 订单状态、付款与实际取餐
+
+`official_order_detail` 的 `status_title` 优先采用官方 `orderStatus`，`status_source` 标明来源。详情顶部的 `orderStatusTitle` 可能是取餐码；它不会覆盖正式状态。缺少正式状态时，只回退已观察到的“待支付／预约完成／已完成／已取消”文字；未知数字、标题类型及状态码不会被猜测翻译。
+
+`official_order_state=COMPLETED` 表示接口报告“已完成”，`CANCELLED` 表示“已取消”，其余为 `UNKNOWN`。`status_description` 保留官方说明。已观察到“已完成”与“请至人工窗口取餐”同时出现，因此不能把订单状态等同于用户已经取走餐品；`collection_verified` 始终为 false。
+
+本项目的 `order_status` 返回 `official_status`、`official_order_state` 和 `official_status_detail`。这些字段与本地 `state`、`paid_verified` 分开：已完成不能单独证明麦钱包付款成功，未知付款仍只查询；取消仍覆盖历史付款状态，但不证明退款到账。已有付款核验且订单已完成时，`next_action=review_completed_order` 提醒 Agent 查看官方说明，不代表补购或确认已取餐。查询失败会标记 `status_query_failed=true` 并要求重新查询，旧状态不能作为最新结论。
+
+这些状态在 `orders_list` 中仍是本地快照，需结合 `status_checked_at` 与实时 `order_status` 阅读。旧购买键的重复调用只查原订单，官方完成不会释放购买记录以便重新下单。
+
 ## 查看账号的官方订单
 
 `official_orders_list(account, page=1, limit=10)` 读取官方账户的一页订单，包括未进入本项目日志的 App 订单。page 为1至100，limit 为1至20。满页只说明可能还有数据，可按 `next_page` 继续；`complete_history=false`，没有伪造总数或完整历史保证。列表的创建/成交时间不能替代预约取餐时间。

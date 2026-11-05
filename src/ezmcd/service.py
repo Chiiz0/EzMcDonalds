@@ -8,6 +8,7 @@ from .accounts import public_account
 from .errors import EzMcdError
 from .models import CheckoutInput, ItemSelection, Policy, cents, pickup_time, yuan, fingerprint
 from .provider import McdProvider
+from .order_views import status_view
 from .transport import data
 
 
@@ -25,14 +26,18 @@ def quote_summary(q):
 
 def attempt_summary(a):
     paid = a.get("state") == "PAID" and a.get("paid_verified")
-    pickup_pending = bool(paid and not a.get("pickup_code"))
+    completed = a.get("official_order_state") == "COMPLETED"
+    pickup_pending = bool(paid and not completed and not a.get("pickup_code"))
     next_action = ("query_order_status" if a.get("status_query_failed") else
                    "review_cancelled_order" if a.get("state") == "CANCELLED" else
+                   "review_completed_order" if paid and completed else
                    "query_pickup_code_later" if pickup_pending else "collect_at_pickup_time" if paid else
                    "query_order_status" if a.get("order_id") else "official_orders_list")
     return {k: a.get(k) for k in ("attempt_id", "state", "order_id", "pickup_code", "pickup_at", "store_code", "paid_verified", "stop_reason", "simulation", "status_query_failed", "status_checked_at")} | {
         "amount_cny": yuan(a["amount_cents"]), "automatic_write_retry": False,
         "pickup_code_pending": pickup_pending, "next_action": next_action,
+        "official_status": a.get("official_status"), "official_order_state": a.get("official_order_state", "UNKNOWN"),
+        "official_status_detail": a.get("official_status_detail"), "collection_verified": False,
         "wallet_balance_cny": yuan(a["wallet_after_cents"]) if "wallet_after_cents" in a else None}
 
 
@@ -377,11 +382,14 @@ class Service:
             attempt["status_query_failed"] = False
             order = state["order"]
             provider.validate_order(attempt, q, order)
+            observed = status_view(order)
             attempt["status_checked_at"] = time.time()
+            attempt.update(official_status=observed["status_title"], official_order_state=observed["official_order_state"],
+                           official_status_detail=observed["status_description"])
             attempt["wallet_after_cents"] = state["wallet_cents"]
             attempt["pickup_code"] = order.get("pickupCode") or None
             title = order.get("orderStatusTitle", "")
-            if title == "已取消":
+            if observed["official_order_state"] == "CANCELLED":
                 attempt.update(state="CANCELLED", paid_verified=False)
             elif (state["cashier"].get("payStatus") == "PAID" and title == "预约完成"
                     and order.get("paymentChannel") == "ARCHCARD"

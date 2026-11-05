@@ -39,6 +39,7 @@ def build_server(service):
         "After a login/session change, runtime_recovery_available allows account_runtime_restore to verify this member's saved recent device evidence without new sampling; it never extends observation age or spending permission. "
         "meal_plan first recovers a local purchase at the same account/store/pickup time; existing_purchase=true means review existing_orders and query the original status, not add a new cart or generate a replacement key. It works offline for that recovery and does not refresh official status. Otherwise it only drafts selections. Inspect checkout_blockers and a fresh quote before checkout_submit. "
         "required_card_offer_unavailable means the named product is listed without the requested card offer. Read card_diagnostics as current store/time API reports, not verified product/card links or a promise about tomorrow. Do not fall back to ordinary prices, alter preferences, or retry automatically. "
+        "Order status labels come from the explicit orderStatus field; the detail headline may be a pickup code. official_order_state=COMPLETED is the API's order state, not proof that the user collected the food or that a wallet payment was reconciled. Read status_description or official_status_detail for current pickup instructions. collection_verified=false; review_completed_order means review those instructions, not buy again. "
         "With a nonempty cart, pickup_methods reports the initial confirmation's fulfillment options. Locker-in and take-in-store are implemented. "
         "If the requested method is not selected, use checkout_quote_pickup with a fresh cart_ref and stable key; its READY result is the quote to review and submit. "
         "The selection belongs to that quote: a new initial GET may still show a default. Recover lost preparation replies with checkout_quote_pickup_status; never resend an unresolved switch under a new key. "
@@ -94,6 +95,7 @@ def build_server(service):
             "payment_settlement": "successful consume followed by at most four read-only status checks, with 1/2/4 second delays; UNKNOWN is query-only, never a reason to repeat payment",
             "order_recovery": "orders_list finds local attempts by account, pickup date and state; works offline after session expiry/revocation; order_status queries the original order live",
             "official_order_history": "paged live account list and exact detail/cashier GETs; includes App-only orders, redacts payment references/contact fields; optional local comparison lists verified and unverified fields without binding or paying; real paging and original-order detail verified",
+            "official_order_status": "Explicit orderStatus takes precedence over the detail headline, which can be a pickup code. Official completion and pickup instructions are exposed separately from wallet verification and physical collection. One external completed order and the existing project order passed live MCP reads; restarting and replaying the original checkout key only queried that order, with no new writes. collection_verified is false",
             "automatic_retries": False, "automatic_schedule": False}
 
     @server.tool(annotations=READ)
@@ -324,7 +326,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def order_status(account: str, attempt_id: str) -> dict:
-        """Reconcile the exact order, cashier and wallet. Never resubmits or consumes; cancellation overrides historical PAID."""
+        """Reconcile the exact order, cashier and wallet. Never resubmits or consumes; cancellation overrides historical PAID. official_order_state is the official status, not proof of physical collection. Read official_status_detail; a completed order can still have pickup instructions. Previously verified payment is retained separately."""
         return service.status(account, attempt_id)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True, open_world_hint=False))

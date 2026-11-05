@@ -43,6 +43,25 @@ def moment(value):
     return parsed.replace(tzinfo=SHANGHAI).isoformat()
 
 
+def status_view(raw):
+    """The detail headline may be a pickup code, not the order's state.
+
+    Prefer the explicit state label. Older responses without it may use one
+    of the already observed textual states as their headline. Do not invent
+    a translation for a numeric title, title type, or unknown status code.
+    """
+    title = text(raw.get("orderStatus"))
+    source = "orderStatus" if title else None
+    if title is None:
+        headline = text(raw.get("orderStatusTitle"))
+        if headline in ("待支付", "预约完成", "已完成", "已取消"):
+            title, source = headline, "orderStatusTitle"
+    return {"status_title": title, "status_source": source,
+        "status_description": text(raw.get("orderStatusSubTitle"), 500), "collection_verified": False,
+        "official_order_state": "COMPLETED" if title == "已完成" else
+                             "CANCELLED" if title == "已取消" else "UNKNOWN"}
+
+
 def products(rows, depth=0):
     if depth > 3 or not isinstance(rows, list) or len(rows) > 100:
         raise ValueError
@@ -62,7 +81,7 @@ def public_order(raw, *, detail=False):
     try:
         result = {"order_id": order_id(raw["orderId"]), "store_code": text(raw.get("storeCode"), 20),
             "store_name": text(raw.get("storeName")), "order_type": text(raw.get("orderTypeName")),
-            "status_title": text(raw.get("orderStatusTitle") or raw.get("orderStatus")),
+            **status_view(raw),
             "amount_cny": money(raw["realTotalAmount"]), "created_at": moment(raw.get("createTime")),
             "pickup_at": moment(raw.get("expectPickUpTime")), "items": products(raw["orderProductList"])}
         if result["amount_cny"] is None:
