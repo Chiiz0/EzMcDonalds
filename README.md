@@ -1,41 +1,21 @@
 # EzMcDonald's
 
-让个人 Agent 使用用户自己授权的麦当劳中国账号，选择门店和餐品，核对优惠，完成到店取餐下单与麦钱包付款。
+让个人 Agent 使用用户自己授权的麦当劳中国账号，选择门店、餐品和优惠，核对报价，在消费授权与预算内完成到店自取和麦钱包付款。
 
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a44`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+**当前版本 `0.1.0a44`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款，重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
 
-a44 修复[慢请求期间的期限检查](docs/orders.md#慢请求期间报价或授权到期)：在下单、预支付和麦钱包扣款发送前重新检查消费授权，新订单还需报价有效。期限在等待中失效时停止，保留原订单与去重记录。
+**开始前先了解三个条件：**
 
-a43 补充[普通券套餐验收](docs/coupons.md#一张券包含多份餐品)：一张中薯条买一送一券对应套餐内两份组件，真实 MCP 的选餐、¥13.50报价、预算拒绝和重启恢复已通过。已清空测试车，没有新增消费；普通券付款仍待验收。
+- 真实适配依赖[指定的官方 Mac 客户端构建](docs/onboarding.md#环境要求)。核心需要 Python 3.11+；项目内钱包采样另需 Python 3.12+。Linux 可运行演示和测试，真实付款未验收。
+- 首次接入仍需本人官方 App 登录及本机授权。项目内短信登录已实测，但需要本人已有的官方设备上下文，不能只输入手机号就取得账号权限。
+- **登录成功不等于可以下单。** 下单还需要本人有效的运行字段和独立消费授权；运行字段尚不能自动续期，无法承诺一次接入后长期无人值守点餐。凭据获取方式见[凭据指南](docs/credentials.md)。
 
-a42 修复[订单状态与取餐说明](docs/orders.md#订单状态付款与实际取餐)的展示：详情顶部的取餐码不会再被当成状态；已完成订单显示正式状态和官方取餐说明。付款核验与实际取餐分别处理，真实 MCP 查单及旧购买键重启重放已通过，没有新增订单或扣款。
-
-a41 改进[优惠不可用时的选餐说明](docs/meal-planning.md#所需卡优惠不可用时)：商品仍在菜单、但没有用户要求的卡优惠时，`meal_plan` 会列出当前卡权益状态和官方规则，不再混同为商品缺失。已通过真实 MCP 核验“今日已用完”的返回；保留原偏好，不自动改用原价，也不承诺次日一定恢复。
-
-a40 增加[显式限期复用本人运行字段](docs/runtime-use.md)：保留原采样日期，由本机用户选择期限，每次使用历史字段下单前重新只读核验。约72小时样本的授权、撤销和MCP展示已实测；没有因此新增消费，历史字段真实下单仍待验收。
-
-a39 已完成“已登录官方 App → 首次采样接入 → 新 MCP 进程核验”的实机链路。若采样中官方 App 请求刷新会话且还没有余额样本，会收尾并明确提示先在正常网络下恢复钱包；不会自动重试刷新。
-
-a38 支持一种重复展开的必选套餐轮次，按每个组件的总份数生成选择；真实 MCP 已验证十翅组合的 ¥49.90 取餐柜报价、预算拒绝、重启去重及清空，没有购买。详情见[套餐组件数量](docs/products.md#套餐组件数量与偏好)。
-
-这是开发者 alpha。**本地短信登录已实测成功，但依赖用户自己已接入的官方设备上下文**；空白机器首次接入仍需官方 App 登录及授权采样，已有账号支持按需会话刷新；旧版 `sampling-capture` 因系统代理影响整机网络已停用；已有样本可继续导入，运行字段尚不能自动跨日更新。支持普通单品、部分套餐组件选择，以及官方 App 已配置的购物车；不是所有门店、商品和优惠均已验收。真实适配当前依赖指定 macOS 官方客户端构建。详见[能力矩阵](docs/capabilities.md)。本项目独立开发，非麦当劳官方项目。
-
-前一天的加购或取餐准备结果不明时，可以[找回并结束已过时的本地意图](docs/cart.md#过了取餐时间仍有未核对记录)，再查看新餐的购物车。旧请求始终留在日志中，不会因换日或重启自动重发；结束本地意图不会清空官方购物车或取消订单。
-
-**采样网络修复（a35）：项目不再启用或恢复系统代理。** `sampling-connect` 改用仅匹配麦当劳可执行文件的本机采样，新增 `sampling-status` 只读诊断；环境不支持时停止，不回退到系统代理。App 退出卡住时限时结束，子进程在父进程消失或超时后自行停止。a37 已通过一次新版官方 App 钱包维护实机验收：采样、退出清理、实时余额与身份核验、更新及重复导入均完成；使用隔离副本，原账号和日志不变。
-
-已有账号可实验性使用 `ezmcd sampling-connect personal --update --manage-app`，只进入麦钱包。可能需要首次授权 mitmproxy 的 macOS 网络扩展；不要操作购物车或付款。原消费策略和购买日志保留。旧版下单运行字段采样已关闭，详情见[采样状态及替代入口](docs/guarded-capture.md)。
-
-a36 增加采样连接诊断与明确的最终结果：`GUARD_ACTIVE` 只表示采样器就绪，`APP_RUNNING` 表示观察到 App 进程；只有导入核验完成后才显示 `ACCOUNT_CONNECTED`、`ACCOUNT_UPDATED` 或 `ACCOUNT_REVERIFIED`。正常收尾但未导入时显示 `ACCOUNT_NOT_CONFIRMED`。a37 为每轮提示增加唯一编号；未观察到 App 进程时明确返回 `app_not_observed`。
-
-重复让 Agent 准备同一餐时，`meal_plan` 会先找本地的原购买记录，直接返回原订单或待核对尝试。即使登录过期，也无需先重新登录才能找回；不会重新选餐、加购或购买。官方最新状态仍由 `order_status` 单独核验，详见[偏好与选餐方案](docs/meal-planning.md)。
+本项目独立开发，非麦当劳官方项目。没有启用定时购买。
 
 ## 快速开始
-
-Python 3.11+，macOS 或 Linux。真实付款目前仅在指定 macOS 环境有验证证据；Linux 可运行演示和测试。
 
 ```sh
 git clone https://github.com/Chiiz0/EzMcDonalds.git
@@ -43,102 +23,105 @@ cd EzMcDonalds
 python3 -m venv .venv
 .venv/bin/python -m pip install -e .
 
-# 完全离线：模拟报价、下单、付款，再次调用验证未重复消费
+# 完全离线：模拟报价、下单、付款及重复调用
 .venv/bin/ezmcd --data-dir .private/demo demo --run
-
-# 生成可粘贴到个人 Agent 的 stdio MCP 配置
-.venv/bin/ezmcd --data-dir .private/demo mcp-config
 ```
 
-尚未发布到 PyPI。演示始终返回 `simulation=true`，不会连接麦当劳或真实扣费。
-
-## 开始使用
-
-已有会员可先运行 `ezmcd doctor` 检查环境与账号。个人 Agent 可以按城市和店名找店，读取菜单、卡券概况，保存套餐偏好并调用 `meal_plan` 生成实时选餐方案。
-
-Agent 也可用 `official_orders_list` / `official_order_detail` 查看官方账号订单及取餐详情，包括未记入本项目日志的订单。回执丢失时可只读比对原尝试的部分字段，完整说明见[订单查询](docs/orders.md)。
-
-[获取自己的凭据](docs/credentials.md) · [采样状态及替代入口](docs/guarded-capture.md) · [偏好与选餐方案](docs/meal-planning.md) · [会话维护](docs/session-maintenance.md)
+尚未发布到 PyPI。演示返回 `simulation=true`，不会连接麦当劳或真实扣费。若要让 Agent 体验演示，可运行 `.venv/bin/ezmcd --data-dir .private/demo mcp-config`；这份配置只连接演示目录。
 
 ## 连接自己的账号
 
-已有 Mac 会员可实验性使用 `ezmcd sampling-connect personal --manage-app`，只进入官方 App 的麦钱包；系统代理保持原样，采样结束后核验并保存账号，消费默认关闭。已有账号维护和首次创建项目账号均已实测通过；首次接入使用隔离空目录，复用已授权证书与扩展，步骤与恢复方式见[首次接入引导](docs/first-connection.md)。
-
-先在官方 App 登录自己的手机号，再按[接入文档](docs/onboarding.md)准备本地采样。Mac 用户可复制一条余额请求后运行下面命令，无需整理 HAR；也可保留原有文件导入方式。命令验证签名、查询当前余额，仅保存必要会话字段。手机号标签不是认证凭据。
+先检查本机环境，再按自己的情况选择入口：
 
 ```sh
-# 在本机调试工具中复制余额请求为 cURL/原始 HTTP 请求后运行
-.venv/bin/ezmcd account connect personal --clipboard
+.venv/bin/ezmcd doctor
+.venv/bin/ezmcd account guide
 ```
 
-复制的命令只作为文本解析，不执行、不发给 Agent；结束后清理剪贴板、恢复代理并移除临时证书。需要重复采样的 Mac 用户可以显式安装[仅限官方 API 主机的持久采样证书](docs/sampling-certificate.md)，后续复用，停用时撤销。[复制请求导入与更新说明](docs/request-import.md)。文件方式如下：
+| 你已有的条件 | 接下来做什么 |
+|---|---|
+| 官方 Mac App 已登录，项目还没有账号 | 按[首次接入引导](docs/first-connection.md)准备采样依赖、证书和网络扩展，再运行 `sampling-connect personal --manage-app`，只进入麦钱包 |
+| 已有同会员的项目账号，需要更新会话 | 在**原数据目录**运行 `sampling-connect personal --update --manage-app`；保留策略和购买日志，见[会话维护](docs/session-maintenance.md) |
+| 已有本人官方设备上下文，想通过短信登录 | 在本机运行 `account login ALIAS --device-from EXISTING_ALIAS`，输入手机号和验证码；见[短信登录](docs/sms-login.md) |
+| 已有本人单条余额请求或 HAR | 使用 `account connect personal --clipboard`、`--request-file` 或 `--har`；见[复制请求导入](docs/request-import.md)和[账号接入](docs/onboarding.md) |
+
+表中子命令均通过 `.venv/bin/ezmcd` 运行。`personal` 是本地别名，不是手机号或认证凭据。首次保存账号时消费默认关闭；MCP 不接收手机号、验证码或会话令牌。
+
+项目内采样仅匹配麦当劳进程，不修改系统代理；环境不支持就停止。**旧版 `sampling-capture` 已停用，不要提交测试订单取得样本。** 首次证书/扩展授权以及最终接入成功的判断，按本机终端和[首次接入引导](docs/first-connection.md)操作。需要重复采样可使用本人显式授权的[受限持久证书](docs/sampling-certificate.md)。
+
+## 检查能否下单
 
 ```sh
-# HAR 文件只保留自己明确授权的会话，权限必须为 0600
-chmod 600 /absolute/path/account.har
-.venv/bin/ezmcd account connect personal --har /absolute/path/account.har
+.venv/bin/ezmcd doctor --account personal --verify-session
 .venv/bin/ezmcd account check personal
 ```
 
-已有验证过的会话可用 `account import --profile ...`。真实下单默认要求24小时内的官方 v5 运行字段；已有样本可由本机用户选择[限期复用](docs/runtime-use.md)，不是自动续期。可导入同会话样本，或在本机显式复用同一官方设备字段的近期样本并做 v5 只读核验。缺失时仍可找店、选餐、加购和报价。**当前无法承诺一次接入后长期无人值守点餐。** 不应为取得采样而额外创建订单；接入格式、依赖和更新流程见[账号接入](docs/onboarding.md)。
+这两个命令只核验账号和余额，不下单或付款。按返回的阻碍继续处理：
 
-已有本人官方设备上下文后，可为自己控制的已注册会员账号执行纯脚本短信登录：
+| 检查结果 | 可继续的操作 | 需要补齐的条件 |
+|---|---|---|
+| 会话有效，缺少下单运行字段 | 找店、看菜单、选券、准备购物车和报价 | 导入本人已有的有效运行样本，见[凭据指南](docs/credentials.md#为什么已登录还可能不能下单) |
+| 原运行样本超过默认24小时 | 保留账号和订单，继续可用的查询 | 更新本人证据，或由本机用户选择[显式限期复用](docs/runtime-use.md)；不改原采样日期，历史字段真实下单仍待验收 |
+| 会话失效或刷新结果未知 | 离线找回本地购买记录 | 按[会话维护](docs/session-maintenance.md)恢复，不重复发送未知刷新请求 |
+| 消费关闭、授权到期或余额不足 | 核对选餐方案、最终报价和付款缺口 | 由本人决定是否授权或在官方入口充值；Agent不能提高额度 |
+
+已注册会员的首次钱包接入和已有账号维护均有实机证据；空白机器安装及长期凭据续期仍有缺口。设备字段的来源和支持范围见[设备上下文](docs/device-context.md)。
+
+## 给个人 Agent 使用
+
+真实账号接入后，重新生成使用**真实账号数据目录**的配置：
 
 ```sh
-# 手机号和验证码在本机终端输入，不回显、不写入命令参数
-.venv/bin/ezmcd account login another-account --device-from personal
+.venv/bin/ezmcd mcp-config
 ```
 
-设备字段的来源、可独立生成的部分和仍需验证的依赖见[设备上下文](docs/device-context.md)。已有刷新令牌的账号可运行 `ezmcd account refresh personal`，详见[会话维护](docs/session-maintenance.md)。
+把输出交给支持 stdio MCP 的个人 Agent。配置包含本机可执行文件及数据目录的绝对路径，不含凭据。默认目录是 `~/.local/share/ezmcdonalds`；如果接入时指定了 `--data-dir` 或 `EZMCD_DATA_DIR`，这里也必须使用同一目录。不要把演示配置误当成真实账号配置，也不要换目录绕过购买日志。[MCP 配置与完整工具列表](docs/mcp.md)
 
-这里只沿用设备字段，不使用旧账号会话；新会话通过号码绑定和钱包只读核验后保存。新账号消费默认关闭，同一会员重新登录保留原策略和日志，旧下单运行字段不复制。详见[短信登录](docs/sms-login.md)。
+可以这样向 Agent 表达需求：
 
-消费默认关闭。用户在本机授权个人 Agent 自动购买时，设置明确限额：
+> 使用 personal 账号，先确认能否下单，再按我保存的早餐偏好准备下一餐。核对门店、具体北京时间、取餐方式、优惠和总额；在我已授权的消费范围内付款，并返回订单状态和取餐码。已有同餐记录时查询原单；缺货、优惠不可用、超预算或需要官方验证时停止并说明。
+
+还没有偏好时，先让 Agent 用 `stores_search`、`pickup_slots`、`menu_list` 和 `product_detail` 核对门店、时段、套餐组件及配料，再调用 `preferences_save` 保存。[偏好与选餐方案](docs/meal-planning.md)说明了早餐卡、指定券名称、组件份数和饮品选择的写法。**保存偏好不会授权消费或创建定时任务。**
+
+## 核对报价并授权购买
+
+Agent 的主要调用顺序：
+
+1. `capabilities` → `accounts_list` → `account_diagnose`，核对当前能力与账号。
+2. `meal_plan` 使用已保存偏好，或从实时门店、菜单和卡券查询开始选餐。商品展示价和预估不是付款金额；指定券使用 `coupons_list` → `coupon_products`。
+3. `cart_get` 查看现有餐品；空车使用 `cart_add_configured` 加入明确选择的商品。已有内容需要用户决定是否移除，不能直接覆盖。加购结果必须为 `MATCHED`；断线后用 `cart_add_status` 找回原操作。
+4. `pickup_methods` 核对取餐方式。所需方式已选中时用 `checkout_quote`；可用但未选中时用新鲜 `cart_ref` 和稳定键调用 `checkout_quote_pickup`。检查商品、组件、优惠、最终金额及 `checkout_blockers`，报价有效120秒。
+5. 用户授权范围和本地策略均允许时，`checkout_submit` 创建并支付一单；同一购买始终使用同一个 `idempotency_key`。
+6. `order_status` 查询原订单和取餐说明。`UNKNOWN` 时只查询，不换键重下；`pickup_code_pending=true` 表示付款已核验但取餐码未生成。官方“已完成”不单独证明用户已取餐。[订单查询](docs/orders.md)
+
+消费默认关闭。需要交给 Agent 自动购买时，由用户在本机设置限额；下面的命令会开启消费，请按自己的授权范围设置门店和期限：
 
 ```sh
 .venv/bin/ezmcd account policy personal \
   --enable-checkout --max-order 20.00 --daily-budget 20.00 --max-orders-day 1
 
 # 可添加 --store 七位门店代码，以及 --expires-at 带时区的有效期
+# 随时关闭消费，保留查询和记录
 .venv/bin/ezmcd account policy personal --disable-checkout
-
-# 移除本地账号凭据并关闭消费，保留订单日志
-.venv/bin/ezmcd account revoke personal
 ```
 
-额度按取餐日（Asia/Shanghai）统计本工具保留的尝试，未知结果也占用额度。其他入口的消费不在本工具预算内。`revoke` 不撤销官方服务器上的登录，也不删除用户原始 HAR 文件。
+额度按北京时间的取餐日统计本项目保留的尝试，未知结果也占用额度；其他入口的消费不计入本项目预算。新订单发送前报价到期，或金融写请求前消费授权到期，会[停止相应请求](docs/orders.md#慢请求期间报价或授权到期)，不会删除原记录或自动重试。麦钱包充值、支付密码或风险验证由本人在官方入口完成。
 
-## 给个人 Agent 使用
+## 日常维护与恢复
 
-运行 `.venv/bin/ezmcd mcp-config`，将输出配置到支持 stdio MCP 的客户端。入口也可使用 `ezmcd-mcp` 或 `python -m ezmcd.mcp_server`。账号、凭据和日志默认存于 `~/.local/share/ezmcdonalds`，可用 `EZMCD_DATA_DIR` 指定。
-
-推荐调用顺序：
-
-1. `capabilities` → `accounts_list` → `account_diagnose`；已有刷新令牌时可调用 `account_refresh` 维护会话。
-2. `stores_search` / `stores_favorites` → `pickup_slots` → `membership_assets` / `menu_list`；指定优惠券可用 `coupons_list` → `coupon_products` 查看对应商品。
-3. `product_detail` 查看套餐轮次和组件；`cart_add_configured` 添加明确选择的商品到空购物车。已有餐品先 `cart_get` 查看，用户要重新选餐时可 `cart_clear` 后再加购；复杂定制仍可在官方 App 配置。
-4. 加购返回 `MATCHED` 后继续；断线或重启用 `cart_add_status` 找回原请求，不换键重加。非空车用 `pickup_methods` 核对取餐柜或柜台自取。所需方式已选中时用 `checkout_quote`；可用但未选中时，用新鲜 `cart_ref` 和稳定键调用 `checkout_quote_pickup`，其 `READY` 结果就是待审阅报价。常用餐品可保存偏好并用 `meal_plan` 生成草案。报价最多有效120秒；余额不足仍展示金额和付款缺口。
-5. 本地策略已授权时，`checkout_submit` 创建并支付一单；同一购买使用稳定的 `idempotency_key`。
-6. `order_status` 查询订单与取餐号。支付成功响应后会短暂等待状态同步；仍为 `UNKNOWN` 时只查询，不换 key 重下。`pickup_code_pending=true` 表示付款已核验、取餐码待生成。
-
-换了聊天或丢失购买回执时，先调用 `orders_list(account, pickup_date)` 找回本项目的购买记录，再用其中的 `attempt_id` 调用 `order_status`。CLI 对应 `ezmcd orders personal --date YYYY-MM-DD`；登录失效或本地撤销后也能先查看记录。列表是历史快照，不包含仅通过官方 App 创建的订单；没有本地记录不等于没有官方订单。详见[订单找回与取餐](docs/orders.md)。
-
-`account_runtime_check` 可单独检查现有运行字段是否通过一次 v5 只读查询，包括历史样本；它不会延长样本期限或授权下单。凭据指引提供请求断点采样方法，运行字段支持 `--clipboard`、`--request-file` 及逐项 `--paste-headers` 导入；订单正文被丢弃，不需要把凭据交给 Agent。
-
-[MCP 工具及调用示例](docs/mcp.md) · [套餐配置](docs/products.md) · [架构](docs/architecture.md)
-
-[优惠券选择](docs/coupons.md)会重新核对券、门店和时段；券失效不自动改成原价。普通冰美式券＋少冰已完成真实加购、¥9.90报价与清空；普通券付款仍待验收。[修改购物车](docs/cart.md)。
-
-普通单品已真实验证两份脆薯饼，以及脆薯饼＋脆香油条的加购、各 ¥17.00 报价和清空。另一门店的柜台自取也已完成显式切换、¥8.50报价及新进程恢复，重复调用没有再次切换。这些测试没有新增购买，柜台自取和跨店真实付款仍待验收。[取餐方式与报价恢复](docs/pickup.md)。
+- **换聊天或丢失回执：** `orders_list` 找本地尝试，再 `order_status` 核对原单。官方入口的订单可用 `official_orders_list` / `official_order_detail` 查询；本地列表不是完整官方历史。[找回订单](docs/orders.md)
+- **加购或取餐准备中断：** 恢复原操作，不换键重发。取餐时间已过且用户放弃该餐时，可[结束本地过时意图](docs/cart.md#过了取餐时间仍有未核对记录)；这不会清空官方购物车、取消订单或释放未知购买记录。
+- **优惠不可用或出现未知商品结构：** 保留用户的选择，不静默改原价、少配料或换餐；按[优惠券](docs/coupons.md)、[套餐配置](docs/products.md)和[取餐方式](docs/pickup.md)说明处理。
+- **会话或运行字段到期：** 按[会话维护](docs/session-maintenance.md)和[限期复用](docs/runtime-use.md)处理；一次只读签名查询成功不会自动授权消费或延长样本日期。
+- **停用：** `account revoke personal` 移除本地账号凭据并关闭消费，保留身份和日志；它不注销官方服务器会话，也不删除原始 HAR。采样证书由本人显式撤销，见[证书管理](docs/sampling-certificate.md)。
 
 ## 实现特点
 
-- 同一会员身份共享订单日志，不能通过更换别名重置预算。
-- 门店、餐段、日期、商品、份数和上限均由参数与实时菜单决定。
-- 核对购物车和确认页的门店、取餐方式、组件、卡券及金额；展示价不是付款金额。
-- 预支付后获取新钱包令牌，付款后核对订单、收银台和余额；官方验证要求交回官方入口。
-- 账号锁、幂等键、购买内容指纹、服务端已有订单检查、发送前持久化日志共同限制重复执行。
-- 凭据和消费策略只通过本地 CLI 管理；MCP 不提供导入凭据或提高额度的工具。
+- 同一会员共享购买日志，不能通过更换别名重置预算。
+- 门店、日期、商品和数量来自参数及实时查询，核心不固定某家店或某套早餐。
+- 报价核对购物车与确认页的取餐方式、组件、卡券和金额；付款后核对订单、收银台和余额。
+- 账号锁、幂等键、购买内容指纹、服务端已有订单检查及发送前持久化日志共同限制重复执行。
+- 凭据与消费策略在本机管理；MCP 不提供导入凭据或提高额度的工具。
 
 ## 开发
 
@@ -148,9 +131,9 @@ chmod 600 /absolute/path/account.har
 .venv/bin/python -m build
 ```
 
-`src/ezmcd/` 包含协议适配、账号、商品、状态机、存储、CLI 与 MCP；`tests/` 为公开测试；`examples/` 提供配置示例。测试默认离线，不执行真实购买。需要私有历史证据的两项对照测试在干净 checkout 中明确跳过。
+源码在 `src/ezmcd/`，公开测试在 `tests/`，配置示例在 `examples/`。测试默认离线，不执行真实购买；需要本机私有证据的两项对照测试在干净 checkout 中跳过，Linux 另跳过 macOS 的加密对照。
 
-公开仓库和发行包不含账号、订单记录、HAR、安装包、官方二进制或提取出的签名密钥。参见[验证记录](docs/validation.md)、[路线](docs/roadmap.md)和[贡献说明](CONTRIBUTING.md)。
+公开仓库和发行包不含账号、订单记录、HAR、官方安装包、二进制或提取出的签名密钥。[验证记录](docs/validation.md)保留成功、失败及尚未验收的边界；开发历史见[更新日志](CHANGELOG.md)，剩余工作见[路线](docs/roadmap.md)。[贡献说明](CONTRIBUTING.md)
 
 ## License
 
