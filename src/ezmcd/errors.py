@@ -8,6 +8,8 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "checkout_policy_expired": ("本地消费授权已到期，已停止后续下单或付款。", "先查看本地购买记录；已有或结果未知的尝试只查原单，不换键重购。重新授权不会自动重发已中断的付款。"),
+        "quote_expired_get_new_quote": ("该报价已过期，不能用于创建新订单。", "先核对是否已有购买记录；尚未创建尝试时可重新取得报价，已有或结果未知的尝试只查询原单。"),
         "runtime_use_age_limit_invalid": ("运行字段复用期限必须为25至168小时。", "期限从原采样时刻算起，不是从授权时刻算起；可用 --disable 恢复默认24小时限制。"),
         "runtime_use_requires_current_account_and_evidence": ("当前账号或本人设备资料不满足限期复用条件。", "先完成登录/会话恢复并核对本人设备样本；复用不能生成字段，也不能跨账号或换设备。"),
         "runtime_use_observation_outside_limit": ("原样本已超过所选期限或时间无效。", "取得新的本人官方运行样本；不能通过重新授权或修改日期延长旧样本。"),

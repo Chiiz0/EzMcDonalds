@@ -176,6 +176,14 @@ class Service:
             raise EzMcdError("order_outside_authorized_policy")
         return policy
 
+    def _check_spending(self, account, quote, *, current_quote=False):
+        if fingerprint(self.store.account(account["alias"])) != fingerprint(account):
+            raise EzMcdError("account_changed_before_checkout")
+        policy = self.policy(account, quote)
+        if current_quote and time.time() >= quote["expires_at"]:
+            raise EzMcdError("quote_expired_get_new_quote")
+        return policy
+
     def quote(self, args):
         account, provider = self.provider(args.account)
         with self.store.lock(account["identity"]):
@@ -307,12 +315,15 @@ class Service:
             balance = provider.wallet()["balance_cents"]
             if balance < q["amount_cents"]:
                 raise EzMcdError("insufficient_wallet_balance")
+            # Quote/duplicate/runtime/balance reads may have crossed a deadline.
+            # Refuse before reserving a purchase when no write has begun.
+            policy = self._check_spending(account, q, current_quote=True)
             attempt = {"attempt_id": uuid.uuid4().hex, "state": "RESERVED", "quote_id": quote_id,
                 "store_code": q["store_code"], "pickup_at": q["pickup_at"], "amount_cents": q["amount_cents"],
                 "wallet_before_cents": balance, "paid_verified": False, "simulation": account["provider"] == "demo"}
             self.store.reserve(identity, request_key, q, policy, attempt)
             try:
-                result = self._write(attempt, "order", lambda: provider.create_order(q))
+                result = self._write(attempt, "order", lambda: provider.create_order(q), account=account, quote=q)
                 created = data(result)
                 if not isinstance(created, dict) or any(not isinstance(created.get(k), str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", created[k]) for k in ("orderId", "payId")):
                     raise EzMcdError("order_result_unknown_query_only")
@@ -324,9 +335,13 @@ class Service:
                 self.store.update_attempt(identity, attempt)
                 return self._status(account, provider, attempt)
 
-    def _write(self, attempt, stage, callback):
+    def _write(self, attempt, stage, callback, *, account, quote):
+        self._check_spending(account, quote, current_quote=stage == "order")
         # Committed before network I/O; a crash leaves a permanent unknown claim.
         self.store.claim(attempt["attempt_id"], stage)
+        # Journal I/O can also take time. Never remove a claim if this check
+        # stops dispatch; the existing attempt remains query-only.
+        self._check_spending(account, quote, current_quote=stage == "order")
         result = callback()
         self.store.receipt(attempt["attempt_id"], stage, result)
         return result
@@ -350,9 +365,9 @@ class Service:
         body = provider.payment_ready(attempt, quote)
         attempt["state"] = "PAYMENT_ATTEMPTED"
         self.store.update_attempt(account["identity"], attempt)
-        preorder = self._write(attempt, "preorder", lambda: provider.preorder(body))
+        preorder = self._write(attempt, "preorder", lambda: provider.preorder(body), account=account, quote=quote)
         inputs = provider.wallet_inputs(attempt, preorder)
-        result = self._write(attempt, "consume", lambda: provider.consume(inputs))
+        result = self._write(attempt, "consume", lambda: provider.consume(inputs), account=account, quote=quote)
         payload = result["response"]
         if result["http_status"] != 200 or str(payload.get("code")) != "0":
             attempt["stop_reason"] = "payment_requires_official_app_or_status_query"
