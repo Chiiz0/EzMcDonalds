@@ -31,6 +31,7 @@ class PreferenceTests(unittest.TestCase):
         self.offer = {"name": "示例组合", "product_code": "100001", "product_type": 7,
                       "offer_id": "offer", "display_price_cny": "10.00", "card_name": "示例早餐卡"}
         self.provider.menu.return_value = {"products": [self.offer]}
+        self.provider.coupons.return_value = {"coupons": []}
         choice = {"product_code": "200001", "name": "咖啡", "available": True,
                   "standard_configuration_supported": True, "extra_cny": "0.00"}
         self.detail = {"max_quantity": 10, "groups": [{"round": 1, "name": "饮品", "min_quantity": 1,

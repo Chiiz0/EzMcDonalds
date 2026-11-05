@@ -307,6 +307,37 @@ def configuration_extra(detail, modifiers, groups):
     return extra
 
 
+def missing_card_offer(name, offers):
+    """The product is listed, but none of these offers has the required card."""
+    return {"reason": "required_card_offer_unavailable", "name": name,
+        "menu_offers": [{k: p.get(k) for k in
+            ("product_code", "offer_id", "name", "product_type", "display_price_cny", "card_name")}
+            for p in offers],
+        "menu_prices_are_final_quotes": False, "product_details_checked": False,
+        "regular_price_fallback_allowed": False,
+        "next_step": "review_card_diagnostics_then_recheck_same_preferences"}
+
+
+def card_diagnostics(provider, request):
+    """Report the API's card status without attributing it to a named product.
+
+    Card titles and menu category labels do not prove a card/product binding.
+    In particular, a reported daily limit is not a promise that a future
+    reservation will become eligible after midnight.
+    """
+    result = {"source": "store_time_coupon_query", "store_code": request.store_code,
+        "pickup_at": request.pickup_at, "product_card_link_verified": False,
+        "future_eligibility_guaranteed": False, "automatic_retry": False}
+    try:
+        rows = provider.coupons(request)["coupons"]
+    except EzMcdError as error:
+        return result | {"checked": False, "error": error.code, "cards": []}
+    fields = ("name", "validity_text", "remaining_today", "remaining_total", "available_for_request",
+              "availability_issues", "rules")
+    return result | {"checked": True, "cards": [{k: c.get(k) for k in fields}
+        for c in rows if c.get("configuration_path") == "menu_card_offer"]}
+
+
 def plan_meal(service, account=None, date=None):
     saved = get_preferences(service.store)["preferences"]
     if not saved:
@@ -384,9 +415,14 @@ def plan_meal(service, account=None, date=None):
                 continue
             if menu is None:
                 menu = provider.menu(request)["products"]
-            parents = {p["offer_id"]: p for p in menu if p["name"] == preference.variant_of
-                       and str(p.get("product_type")) == "3"
-                       and bool(p.get("card_name")) == preferences.require_card_discount}
+            named_parents = [p for p in menu if p["name"] == preference.variant_of
+                             and str(p.get("product_type")) == "3"]
+            parents = {p["offer_id"]: p for p in named_parents
+                       if bool(p.get("card_name")) == preferences.require_card_discount}
+            if (not parents and preferences.require_card_discount
+                    and len({p["offer_id"] for p in named_parents}) == 1):
+                issues.append(missing_card_offer(preference.variant_of, named_parents))
+                continue
             if len(parents) != 1:
                 issues.append({"reason": "preferred_variant_parent_unavailable_or_ambiguous", "name": preference.variant_of})
                 continue
@@ -425,8 +461,13 @@ def plan_meal(service, account=None, date=None):
         else:
             if menu is None:
                 menu = provider.menu(request)["products"]
-            offers = [p for p in menu if p["name"] == preference.name and str(p.get("product_type")) in ("1", "7")
-                      and (not preferences.require_card_discount or p.get("card_name"))]
+            named_offers = [p for p in menu if p["name"] == preference.name
+                            and str(p.get("product_type")) in ("1", "7")]
+            offers = [p for p in named_offers if not preferences.require_card_discount or p.get("card_name")]
+            if (not offers and preferences.require_card_discount
+                    and len({p["product_code"] for p in named_offers}) == 1):
+                issues.append(missing_card_offer(preference.name, named_offers))
+                continue
         # Never choose between distinct products merely because their names match.
         if not offers or len({p["product_code"] for p in offers}) != 1:
             issues.append({"reason": "preferred_product_unavailable_or_ambiguous", "name": preference.name, "offers": offers})
@@ -467,6 +508,8 @@ def plan_meal(service, account=None, date=None):
             estimate = estimate + (cents(base) + extra + fees) * preference.quantity if base is not None and extra is not None else None
     if estimate is not None and estimate > cents(preferences.max_amount_cny):
         issues.append({"reason": "estimated_price_exceeds_preference_limit"})
+    if any(issue["reason"] == "required_card_offer_unavailable" for issue in issues):
+        result["card_diagnostics"] = card_diagnostics(provider, request)
     key = "meal-" + fingerprint({"account": alias, "store_code": request.store_code, "pickup_at": request.pickup_at})[:32]
     return result | {"request": request.model_dump(), "items": selections if not issues else [],
         "products": descriptions, "selection_ready": not issues and bool(selections), "issues": issues,

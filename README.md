@@ -5,7 +5,9 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a40`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+**当前版本 `0.1.0a41`：本地 Python CLI + 38 个 stdio MCP 工具。** 公开核心已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款；重启后重复调用返回同一笔订单，没有再次扣款。项目提供多账号隔离、本地短信登录、会话维护、城市/店名搜索、门店时段可用券、套餐、规格与配料偏好、实时选餐方案、消费策略和防重复日志。咖啡卡的部分父页规格也已通过实时资格校验、加购及报价，其他优惠结构仍按[能力边界](docs/capabilities.md)处理。
+
+a41 改进[优惠不可用时的选餐说明](docs/meal-planning.md#所需卡优惠不可用时)：商品仍在菜单、但没有用户要求的卡优惠时，`meal_plan` 会列出当前卡权益状态和官方规则，不再混同为商品缺失。已通过真实 MCP 核验“今日已用完”的返回；保留原偏好，不自动改用原价，也不承诺次日一定恢复。
 
 a40 增加[显式限期复用本人运行字段](docs/runtime-use.md)：保留原采样日期，由本机用户选择期限，每次使用历史字段下单前重新只读核验。约72小时样本的授权、撤销和MCP展示已实测；没有因此新增消费，历史字段真实下单仍待验收。
 
