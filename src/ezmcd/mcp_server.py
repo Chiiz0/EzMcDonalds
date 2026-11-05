@@ -46,7 +46,7 @@ def build_server(service):
         "To change a nonempty cart, inspect cart_get and use its short-lived cart_ref with cart_clear only when the user wants those items removed. "
         "After cart addition, only MATCHED suggests a fresh quote. On a lost reply or restart use cart_add_status; never switch keys to repeat an unresolved addition. "
         "Use cart_operations_list to find unresolved local cart intents. If the user abandons a meal whose pickup time has passed, cart_operation_retire closes only that local intent, retains its write claim and leaves official carts and purchases untouched. Inspect the new meal's cart before continuing; never treat retirement as cancellation or proof of failure. "
-        "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. Never silently replace an unavailable coupon with regular price. "
+        "Use coupons_list and coupon_products for explicit coupons; preserve coupon_ref in detail and cart calls. For a supported coupon combo, item quantity counts coupon bundles and combo component quantities count the portions inside each bundle; a buy-one-get-one title alone never determines those quantities. Follow the live product detail. Never silently replace an unavailable coupon with regular price. "
         "For variants absent from the menu, use product_detail's validated parent_detail_selection and preserve variant_of plus the parent offer_id in cart_add_configured. A card variant needs matching live member eligibility, explicit eligible product lists and its own parent promotion binding; other parent discounts cannot be inferred. Related offers are not selected automatically. "
         "Use a stable idempotency key per user purchase. "
         "Use orders_list to recover local purchase attempts after a restart or lost context; it is not the official account's full order history. "
@@ -77,7 +77,7 @@ def build_server(service):
             "order_components": "verified against each parent product and quantity before payment; swapping components across distinct meal rows is rejected",
             "combo_configuration": "explicit round choices; identical mandatory singleton expanded rows may merge into exact quantities with source_entries, native ten-wing combo quote verified a38; unknown repeated shapes stop; supported free toggles and single choices such as ice; inactive sold-out groups omitted; observed optional replacements and free-default binary paid add-ons supported with bound fee evidence; defaults never add a paid option; other paid or unknown modifications use official cart",
             "optional_modifier_evidence": "regular cappuccino with optional oat milk passed real MCP add, CNY23.00 quote, CNY22.00 refusal and restart without re-add; unselected milk option passed CNY21.00 quote and restart; test carts cleared, no new payments; other paid shapes and real payment unverified",
-            "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks; ordinary coupon payment unverified",
+            "coupon_configuration": "fresh references scoped to account/store/time; one ordinary coffee coupon with less ice passed real cart and CNY9.90 quote checks. One buy-one-get-one fries coupon combo passed real MCP planning, two component portions in one bundle, CNY13.50 quote, CNY13.49 budget refusal, restart without repeat add/switch and clear; coupon uses, wallet and orders unchanged. Ordinary coupon payment unverified; other bundle structures are not inferred from names",
             "cart_changes": "cart_get/cart_add return a 120-second member/store/time-bound reference; explicit cart_clear rechecks the complete cart and sends once; repeats only query; real clear and repeat verified, no cross-client atomic lock",
             "cart_recovery": "draft and input bound before sending; same-key calls only compare the current cart; cart_add_status recovers a specific or latest recorded addition after restart; real coffee cart verified with locally injected lost reply/readback; pre-a14 records cannot be reconstructed",
             "expired_cart_intents": "local list and explicit retirement of unresolved addition/pickup preparations only after their pickup time; retained request and write claim, no upstream calls or financial changes; old keys never replay, new meal still requires current-cart review",
@@ -188,7 +188,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def coupon_products(request: CheckoutInput, coupon_ref: str) -> dict:
-        """Recheck an available coupon and list its matching products/prices. Pass coupon_ref and offer_id to product_detail and cart_add_configured. Card benefits use existing menu card offers; special bundles require official configuration."""
+        """Recheck an available coupon and list its matching products/prices. Pass coupon_ref and offer_id to product_detail and cart_add_configured. For supported combos, distinguish bundle quantity from component portions using live detail. Card benefits use menu card offers; unrecognized bundle structures require official configuration."""
         _, provider = service.provider(request.account)
         return provider.coupon_products(request, coupon_ref)
 
