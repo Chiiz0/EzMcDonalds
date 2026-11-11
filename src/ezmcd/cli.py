@@ -104,6 +104,7 @@ def main():
     policy.add_argument("--max-orders-day", type=int, default=1)
     policy.add_argument("--store", action="append", default=[])
     policy.add_argument("--expires-at")
+    policy.add_argument("--quote-id", help="Authorize only this fresh quote's exact meal, price and pickup; default expiry is at most 15 minutes, identical renewal does not extend it")
     demo = commands.add_parser("demo")
     demo.add_argument("--alias", default="demo")
     demo.add_argument("--run", action="store_true", help="Run simulated quote/order/payment; never contacts McDonald's")
@@ -290,7 +291,8 @@ def main():
             else:
                 result = service.set_policy(args.alias, Policy(allow_checkout=args.enable_checkout,
                     max_order_cents=cents(args.max_order), daily_budget_cents=cents(args.daily_budget),
-                    max_orders_per_day=args.max_orders_day, allowed_stores=args.store, expires_at=args.expires_at))
+                    max_orders_per_day=args.max_orders_day, allowed_stores=args.store, expires_at=args.expires_at),
+                    quote_id=args.quote_id)
         elif args.command == "demo":
             try:
                 record = store.account(args.alias)

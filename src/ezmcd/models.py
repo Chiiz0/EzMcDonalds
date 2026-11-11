@@ -44,6 +44,12 @@ def pickup_time(value: str) -> datetime:
         raise EzMcdError("pickup_requires_iso8601_with_timezone_and_minute_precision") from None
 
 
+class QuoteScope(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    quote_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    content_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class Policy(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     allow_checkout: bool = False
@@ -52,6 +58,8 @@ class Policy(BaseModel):
     max_orders_per_day: int = Field(default=1, ge=1, le=20)
     allowed_stores: list[str] = Field(default_factory=list)
     expires_at: str | None = None
+    # Omit when absent to preserve existing account/policy serialization.
+    quote_scope: QuoteScope | None = Field(default=None, exclude_if=lambda value: value is None)
 
     @field_validator("allowed_stores")
     @classmethod

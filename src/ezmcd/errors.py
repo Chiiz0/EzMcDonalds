@@ -8,6 +8,8 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "quote_authorization_requires_enabled_policy": ("按报价授权需要明确开启这一次消费。", "核对新鲜报价后，在本机使用 account policy --enable-checkout --quote-id；关闭消费时不要传入报价。"),
+        "quote_outside_authorized_purchase": ("当前报价不属于本机已授权的那一餐。", "先查询原购买记录。门店、时间、取餐方式、商品配料、优惠或金额变化均需重新确认；不扩大额度、不换键重购。相同内容的新鲜报价可沿用原授权期限。"),
         "checkout_policy_expired": ("本地消费授权已到期，已停止后续下单或付款。", "先查看本地购买记录；已有或结果未知的尝试只查原单，不换键重购。重新授权不会自动重发已中断的付款。"),
         "quote_expired_get_new_quote": ("该报价已过期，不能用于创建新订单。", "先核对是否已有购买记录；尚未创建尝试时可重新取得报价，已有或结果未知的尝试只查询原单。"),
         "runtime_use_age_limit_invalid": ("运行字段复用期限必须为25至336小时（最多14天）。", "期限从原采样时刻算起，不是从授权时刻算起；可用 --disable 恢复默认24小时限制。"),

@@ -1,12 +1,12 @@
 """Account-scoped application service shared by CLI and MCP."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import re
 import time
 import uuid
 
 from .accounts import public_account
 from .errors import EzMcdError
-from .models import CheckoutInput, ItemSelection, Policy, cents, pickup_time, yuan, fingerprint
+from .models import CheckoutInput, ItemSelection, Policy, QuoteScope, cents, pickup_time, yuan, fingerprint
 from .provider import McdProvider
 from .order_views import status_view
 from .transport import data
@@ -22,6 +22,15 @@ def quote_summary(q):
         "checkout_blockers": q.get("checkout_blockers", []),
         "pickup_confirmation": q.get("pickup_confirmation"),
         "fresh_order_checks_still_required": True}
+
+
+def quote_authorization_fingerprint(identity, quote):
+    # Exclude only refresh metadata (quote ID, expiry, wallet balance, request
+    # ceiling). Bind every ordered item/customization, promotion and price via
+    # both the reviewable content and the exact order body.
+    return fingerprint({"identity": identity, **{key: quote[key] for key in (
+        "store_code", "pickup_at", "eat_type", "items", "discount_names", "amount_cents",
+        "regular_cents", "discount_cents", "body", "intent", "checkout_digest")}})
 
 
 def attempt_summary(a):
@@ -155,15 +164,49 @@ class Service:
         from .sessions import refresh_account
         return refresh_account(self.store, alias, provider_factory=self.provider_factory)
 
-    def set_policy(self, alias, policy):
+    def set_policy(self, alias, policy, *, quote_id=None):
         # Local CLI only. This method is intentionally not registered as an MCP tool.
+        result = {}
         def update(account):
             if account.get("revoked") and policy.allow_checkout:
                 raise EzMcdError("account_revoked_reconnect_locally")
-            account["policy"] = policy.model_dump()
+            selected = policy
+            if quote_id is not None:
+                if not policy.allow_checkout:
+                    raise EzMcdError("quote_authorization_requires_enabled_policy")
+                q = self.store.quote(account["identity"], quote_id)
+                if time.time() >= q["expires_at"]:
+                    raise EzMcdError("quote_expired_get_new_quote")
+                if self.store.attempts_at_pickup(account["identity"], q["store_code"], q["pickup_at"]):
+                    raise EzMcdError("existing_local_attempt_at_same_store_and_pickup_time")
+                if (q["amount_cents"] > min(policy.max_order_cents, policy.daily_budget_cents)
+                        or policy.allowed_stores and q["store_code"] not in policy.allowed_stores):
+                    raise EzMcdError("order_outside_authorized_policy")
+                scope = QuoteScope(quote_id=quote_id,
+                    content_fingerprint=quote_authorization_fingerprint(account["identity"], q))
+                prior = Policy.model_validate(account["policy"])
+                repeated_content = bool(prior.quote_scope and prior.quote_scope.content_fingerprint == scope.content_fingerprint
+                    and prior.model_dump(exclude={"quote_scope", "expires_at"}) == policy.model_dump(exclude={"quote_scope", "expires_at"}))
+                expires = policy.expires_at
+                if expires is None:
+                    expires = (prior.expires_at if repeated_content else
+                        (datetime.now(timezone.utc) + timedelta(minutes=15)).isoformat(timespec="minutes"))
+                if expires is None or pickup_time(expires) <= datetime.now(timezone.utc):
+                    raise EzMcdError("checkout_policy_expired")
+                if repeated_content:
+                    scope = prior.quote_scope  # Preserve the first approval reference.
+                selected = policy.model_copy(update={"quote_scope": scope, "expires_at": expires})
+                # Saved quote content is review evidence, not a new readiness
+                # check. Its old "checkout_disabled" flag is now stale.
+                review = quote_summary(q)
+                review.pop("checkout_blockers", None)
+                result.update(authorized_quote=review, quote_is_saved_snapshot=True, one_purchase_content_only=True,
+                    identical_fresh_quote_allowed=True, automatic_write_retry=False,
+                    order_created=False, payment_attempted=False)
+            account["policy"] = selected.model_dump()
             return account
-        self.store.modify_account(alias, update)
-        return {"account": alias, "policy": policy.model_dump()}
+        updated = self.store.modify_account(alias, update)
+        return {"account": alias, "policy": updated["policy"], **result}
 
     def policy(self, account, q):
         policy = Policy.model_validate(self.store.account(account["alias"])["policy"])
@@ -174,6 +217,8 @@ class Service:
         if (q["amount_cents"] > policy.max_order_cents or
                 policy.allowed_stores and q["store_code"] not in policy.allowed_stores):
             raise EzMcdError("order_outside_authorized_policy")
+        if policy.quote_scope and policy.quote_scope.content_fingerprint != quote_authorization_fingerprint(account["identity"], q):
+            raise EzMcdError("quote_outside_authorized_purchase")
         return policy
 
     def _check_spending(self, account, quote, *, current_quote=False):
@@ -311,6 +356,8 @@ class Service:
                      provider.quote(CheckoutInput.model_validate(q["request"])))
             if fresh["checkout_digest"] != q["checkout_digest"] or fresh["intent"] != q["intent"]:
                 raise EzMcdError("checkout_changed_get_new_quote")
+            if policy.quote_scope:
+                self.policy(account, fresh)
             provider.preflight(q)
             balance = provider.wallet()["balance_cents"]
             if balance < q["amount_cents"]:

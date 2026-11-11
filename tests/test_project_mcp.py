@@ -129,6 +129,51 @@ class MCPTests(unittest.IsolatedAsyncioTestCase):
             with store.connect() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM writes").fetchone()[0], 5)  # clear, add, three checkout stages
 
+    async def test_local_quote_authorization_and_fresh_mcp_quote_pay_only_that_meal(self):
+        import subprocess
+        from ezmcd.models import Policy
+        with tempfile.TemporaryDirectory() as temporary:
+            store = Store(Path(temporary)); setup_demo(store)
+            Service(store).set_policy("demo", Policy())
+            pickup = (datetime.now(SHANGHAI)+timedelta(days=1)).replace(hour=10, minute=15, second=0, microsecond=0)
+            request = {"account":"demo", "store_code":"9000001", "pickup_at":pickup.isoformat(),
+                       "max_amount_cny":"20.00", "eat_type":"locker-in"}
+            params = StdioServerParameters(command=sys.executable, args=["-m", "ezmcd.mcp_server"],
+                                          env={"EZMCD_DATA_DIR":str(store.root)})
+            async with Client(params) as client:
+                async def call(name, args):
+                    result = await client.call_tool(name, args)
+                    self.assertFalse(result.is_error)
+                    return json.loads(result.content[0].text)
+                original = await call("checkout_quote", {"request":request})
+                self.assertIn("checkout_disabled", original["checkout_blockers"])
+                authorized = subprocess.run([sys.executable, "-m", "ezmcd.cli", "--data-dir", str(store.root),
+                    "account", "policy", "demo", "--enable-checkout", "--quote-id", original["quote_id"],
+                    "--max-order", "20.00", "--daily-budget", "20.00", "--max-orders-day", "1"],
+                    capture_output=True, text=True, check=True, timeout=10)
+                self.assertTrue(json.loads(authorized.stdout)["one_purchase_content_only"])
+                fresh = await call("checkout_quote", {"request":request})
+                self.assertEqual(fresh["checkout_blockers"], [])
+                self.assertNotEqual(fresh["quote_id"], original["quote_id"])
+                paid = await call("checkout_submit", {"account":"demo", "quote_id":fresh["quote_id"], "idempotency_key":"one-approved-meal"})
+                self.assertTrue(paid["paid_verified"])
+                next_day = await call("checkout_quote", {"request":request | {"pickup_at":(pickup+timedelta(days=1)).isoformat()}})
+                self.assertIn("quote_outside_authorized_purchase", next_day["checkout_blockers"])
+                blocked = await client.call_tool("checkout_submit", {"account":"demo", "quote_id":next_day["quote_id"], "idempotency_key":"not-authorized"})
+                self.assertEqual(json.loads(blocked.content[0].text)["error"], "quote_outside_authorized_purchase")
+                names = {tool.name for tool in (await client.list_tools()).tools}
+                self.assertNotIn("set_policy", names)
+                self.assertNotIn("authorize_quote", names)
+            Service(store).set_policy("demo", Policy())
+            async with Client(params) as client:
+                result = await client.call_tool("checkout_submit", {"account":"demo", "quote_id":fresh["quote_id"], "idempotency_key":"one-approved-meal"})
+                repeated = json.loads(result.content[0].text)
+                self.assertEqual(repeated["order_id"], paid["order_id"])
+                self.assertEqual(repeated["wallet_balance_cny"], "90.00")
+            with store.connect() as db:
+                self.assertEqual(dict(db.execute("SELECT stage,count(*) FROM writes GROUP BY stage")),
+                                 {"order":1, "preorder":1, "consume":1})
+
     async def test_stdio_expired_cart_retirement_and_next_day_simulated_purchase(self):
         from unittest.mock import patch
         from ezmcd.demo import DemoProvider

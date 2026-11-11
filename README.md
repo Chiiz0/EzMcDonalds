@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a47`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
+**当前版本 `0.1.0a48`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
 
 **开始前先了解三个条件：**
 
@@ -96,16 +96,21 @@ Agent 的主要调用顺序：
 5. 用户授权范围和本地策略均允许时，`checkout_submit` 创建并支付一单；同一购买始终使用同一个 `idempotency_key`。
 6. `order_status` 查询原订单和取餐说明。`UNKNOWN` 时只查询，不换键重下；`pickup_code_pending=true` 表示付款已核验但取餐码未生成。官方“已完成”不单独证明用户已取餐。[订单查询](docs/orders.md)
 
-消费默认关闭。需要交给 Agent 自动购买时，由用户在本机设置限额；下面的命令会开启消费，请按自己的授权范围设置门店和期限：
+消费默认关闭。只授权当前这一餐时，先核对 Agent 返回的新鲜报价，再由本人在同一数据目录执行下面的命令，将 `<quote_id>` 换为该报价编号：
 
 ```sh
 .venv/bin/ezmcd account policy personal \
-  --enable-checkout --max-order 20.00 --daily-budget 20.00 --max-orders-day 1
+  --enable-checkout --quote-id '<quote_id>' \
+  --max-order 20.00 --daily-budget 20.00 --max-orders-day 1
 
-# 可添加 --store 七位门店代码，以及 --expires-at 带时区的有效期
+# 默认授权最多15分钟；可明确提供 --expires-at 带时区的有效期
 # 随时关闭消费，保留查询和记录
 .venv/bin/ezmcd account policy personal --disable-checkout
 ```
+
+`--quote-id` 把账号、门店、取餐时间/方式、餐品配料、优惠和金额锁定为这一餐。授权本身不下单；Agent随后使用原稳定购买键提交。同内容的新鲜报价可以沿用原期限，任何内容或价格变化都需重新确认。重复相同内容和额度不会自动延长期限，已有购买记录时拒绝重新授权，原键只查询原单。此模式已有离线CLI/MCP完整测试，尚未新增真实扣款验收。[按报价授权](docs/orders.md#按一份报价授权)
+
+需要持续消费策略时，可在用户明确授权其范围后省略 `--quote-id`，并设置额度、`--store` 和 `--expires-at`；不会因此启用定时任务。MCP没有创建或扩大消费授权的工具。
 
 额度按北京时间的取餐日统计本项目保留的尝试，未知结果也占用额度；其他入口的消费不计入本项目预算。新订单发送前报价到期，或金融写请求前消费授权到期，会[停止相应请求](docs/orders.md#慢请求期间报价或授权到期)，不会删除原记录或自动重试。麦钱包充值、支付密码或风险验证由本人在官方入口完成。
 
