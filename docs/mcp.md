@@ -75,6 +75,8 @@
 
 账号刷新及重复调用规则见[会话维护](session-maintenance.md)。`readiness` 区分可浏览与下单前置条件，不替代实时订单检查。
 
+`account_diagnose.runtime_guidance` 将账号恢复、原设备近期样本恢复、默认期限内可用、已授权限期内可用、用户可选择复用、必须取得新证据分别说明。`explicit_reuse_option` 是给本机用户的选择，Agent不能替用户选择时长或执行授权；时间均为Unix秒，剩余时间仅对 `checked_at` 时刻有效，不能当成上游保证。消费策略过期时，`expired_policy_guidance` 提供本地 `orders_list` 调用参数，先找原单，再决定新消费授权。所有诊断均不修改策略、采样日期或购买记录。
+
 ## 报价请求
 
 `menu_list`、`cart_get`和`checkout_quote`等使用统一的`request`：

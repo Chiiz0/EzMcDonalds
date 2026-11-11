@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a46`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
+**当前版本 `0.1.0a47`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
 
 **开始前先了解三个条件：**
 
@@ -66,6 +66,8 @@ python3 -m venv .venv
 | 消费关闭、授权到期或余额不足 | 核对选餐方案、最终报价和付款缺口 | 由本人决定是否授权或在官方入口充值；Agent不能提高额度 |
 
 已注册会员的首次钱包接入和已有账号维护均有实机证据；空白机器安装及长期凭据续期仍有缺口。设备字段的来源和支持范围见[设备上下文](docs/device-context.md)。
+
+`doctor` 和 Agent 的 `account_diagnose` 会给出 `runtime_guidance`：原样本何时到期、当前还剩多久，以及需要恢复账号、核验原设备样本、由本人选择限期复用，还是必须取得新证据。复用选项只描述本机条件，不自动选择最长时限或开启权限。消费策略已到期时，诊断会先引导查询原购买记录。
 
 ## 给个人 Agent 使用
 

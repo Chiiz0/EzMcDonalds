@@ -119,7 +119,7 @@ def build_server(service):
     @server.tool(annotations=READ)
     @protected
     def account_diagnose(account: str, verify_session: bool = True) -> dict:
-        """Explain client, session, device and checkout readiness with next steps. Optional live check only reads wallet balance; never refreshes, logs in, or purchases."""
+        """Explain client, session, device and checkout readiness with next steps. runtime_guidance shows original runtime expiry and, when locally eligible, an explicit user-choice reuse option; it never grants/extends permission or proves server acceptance. Expired policy guidance finds existing orders first. Optional live check only reads wallet balance; never refreshes, logs in, or purchases."""
         from .diagnostics import doctor
         return doctor(service, account, verify_session=verify_session)
 

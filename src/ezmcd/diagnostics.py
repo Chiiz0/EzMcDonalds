@@ -2,6 +2,7 @@
 import hashlib
 from pathlib import Path
 import platform
+import time
 
 from . import __version__
 from .accounts import public_account
@@ -9,6 +10,65 @@ from .errors import EzMcdError, error_result
 from .protocol.signing import BUILD
 
 GUIDE = "https://github.com/Chiiz0/EzMcDonalds/blob/main/docs/credentials.md"
+
+
+def runtime_guidance(record, now, *, account_recovery_required=False):
+    """Explain local choices, without granting permission or validating upstream."""
+    from .runtime_recovery import device_context, recovery_available
+    from .runtime_use import DEFAULT_HOURS, MAX_HOURS, active, evidence_age
+    age = evidence_age(record, now)
+    result = {"state": None, "checked_at": now, "observed_at": None,
+        "usable_until": None, "remaining_seconds": None, "explicit_reuse_option": None,
+        "local_conditions_only": True, "readonly_validation_performed": False,
+        "observation_time_changed": False, "permission_changed": False,
+        "spending_authorized": False, "use_same_data_directory": True}
+    if record["provider"] == "demo":
+        result["state"] = "not_required_for_demo"
+    elif account_recovery_required or record.get("revoked") or record.get("session_refresh", {}).get("state") in ("CLAIMED", "CANDIDATE", "STOPPED"):
+        result["state"] = "complete_account_recovery_first"
+    elif device_context(record) is None or not record.get("profile", {}).get("fields", {}).get("sid"):
+        result["state"] = "connect_own_device_context_first"
+    elif recovery_available(record, now) and (age is None or age > DEFAULT_HOURS * 3600 and not active(record, now)):
+        result["state"] = "restore_previous_own_runtime_readonly"
+    elif age is None:
+        result["state"] = "new_official_evidence_required"
+    else:
+        observed = record["runtime"]["observed_at"]
+        result["observed_at"] = observed
+        if active(record, now):
+            result["state"] = "available_under_explicit_permission"
+            result["usable_until"] = record["runtime_use"]["expires_at"]
+        elif age <= DEFAULT_HOURS * 3600:
+            result["state"] = "available_under_default_limit"
+            result["usable_until"] = observed + DEFAULT_HOURS * 3600
+        elif age < MAX_HOURS * 3600:
+            # Integer hours must end strictly after this snapshot. Choosing a
+            # duration is left to the owner; do not suggest silently using max.
+            result["state"] = "explicit_reuse_choice_available"
+            result["explicit_reuse_option"] = {
+                "minimum_max_age_hours": max(DEFAULT_HOURS + 1, int(age // 3600) + 1),
+                "maximum_max_age_hours": MAX_HOURS,
+                "latest_possible_expiry": observed + MAX_HOURS * 3600,
+                "maximum_remaining_seconds": max(0, int(MAX_HOURS * 3600 - age)),
+                "requires_local_user_decision": True, "requires_readonly_validation": True,
+                "cli_argv_template": ["ezmcd", "account", "runtime-use", record["alias"],
+                                      "--max-age-hours", "<chosen_hours>"],
+                "guide_url": "https://github.com/Chiiz0/EzMcDonalds/blob/main/docs/runtime-use.md"}
+        else:
+            result["state"] = "new_official_evidence_required"
+        if result["usable_until"] is not None:
+            result["remaining_seconds"] = max(0, int(result["usable_until"] - now))
+    result["message"] = {
+        "not_required_for_demo": "离线演示不使用官方运行字段。",
+        "complete_account_recovery_first": "先完成当前账号恢复，再检查运行样本；刷新结果未知时不要重复刷新。",
+        "connect_own_device_context_first": "先在本机接入本人的完整官方设备上下文；不能仅凭手机号生成运行字段。",
+        "restore_previous_own_runtime_readonly": "可只读核验并恢复本人原设备的近期样本，原采样日期不变。",
+        "new_official_evidence_required": "需要新的本人官方运行请求证据；登录或进入钱包不能更新运行样本，不要为取样额外提交订单。",
+        "available_under_default_limit": "运行样本仍在默认期限内；报价、会话和消费授权仍需分别核对。",
+        "available_under_explicit_permission": "原运行样本仍在已授权期限内，每单仍会重新只读核验；到期后不会自动延长。",
+        "explicit_reuse_choice_available": "原运行样本已超过当前许可；可由本人选择有限复用期限并只读核验，也可导入新的本人证据。这里没有授予复用或消费权限。",
+    }[result["state"]]
+    return result
 
 
 def credentials_guide():
@@ -65,19 +125,31 @@ def doctor(service, alias=None, *, verify_session=False, binary="/Applications/M
             except (OSError, ValueError, KeyError, TypeError):
                 view["session_check"] = error_result("invalid_local_configuration_or_response")
         actions = []
+        view["runtime_guidance"] = runtime_guidance(record, time.time(),
+            account_recovery_required=view["session_status"] == "expired_relogin_or_refresh")
         if view.get("session_recovery"):
             actions.append(view["session_recovery"])
         elif view["session_status"] == "expired_relogin_or_refresh":
             actions.append("refresh_session_or_relogin_locally")
         if view["client_build"] not in ("supported", "not_required_for_demo"):
             actions.append("install_or_select_supported_official_client_build")
-        if not view.get("device_context_available") and record["provider"] != "demo":
+        runtime_state = view["runtime_guidance"]["state"]
+        if (not view.get("device_context_available") or runtime_state == "connect_own_device_context_first") and record["provider"] != "demo":
             actions.append("connect_your_own_official_device_context")
-        if not view["runtime_available"] and record["provider"] != "demo":
+        if not view["runtime_available"] and record["provider"] != "demo" and runtime_state not in (
+                "complete_account_recovery_first", "connect_own_device_context_first"):
             actions.append("restore_previous_own_runtime_readonly" if view["runtime_recovery_available"]
+                           else "choose_explicit_runtime_reuse_or_update_evidence_locally"
+                           if runtime_state == "explicit_reuse_choice_available"
                            else "update_official_runtime_evidence_before_checkout")
         if not record["policy"]["allow_checkout"]:
             actions.append("set_local_spending_policy_only_when_purchase_is_wanted")
+        if "checkout_policy_expired" in view["readiness"]["checkout_blockers"]:
+            actions.append("review_existing_orders_before_new_local_spending_authorization")
+            help_text = error_result("checkout_policy_expired")
+            view["expired_policy_guidance"] = {"message": help_text["message"],
+                "next_action": help_text["next_action"], "permission_changed": False,
+                "local_orders_tool": {"name": "orders_list", "arguments": {"account": record["alias"]}}}
         view["next_actions"] = actions
         accounts.append(view)
     return {"version": __version__, "platform": platform.system(), "session_checks_requested": verify_session,
