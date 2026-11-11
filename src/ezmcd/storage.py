@@ -22,12 +22,22 @@ def secure_directory(path: Path):
     os.chmod(path, 0o700)
 
 
+def _unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            # Do not echo a private key or value into an error/CLI response.
+            raise EzMcdError("private_json_duplicate_keys")
+        result[key] = value
+    return result
+
+
 def read_private(path: Path):
     if path.is_symlink() or not stat.S_ISREG(path.stat().st_mode) or path.stat().st_mode & 0o077:
         raise EzMcdError("private_file_permissions_required")
     if path.stat().st_size > 4 * 1024 * 1024:
         raise EzMcdError("private_file_too_large")
-    return json.loads(path.read_text())
+    return json.loads(path.read_text(), object_pairs_hook=_unique_json_object)
 
 
 def write_private(path: Path, value):

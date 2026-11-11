@@ -9,6 +9,7 @@ import re
 import time
 
 from .errors import EzMcdError
+from .capture import sample_headers
 from .models import fingerprint, Policy
 from .protocol.signing import BUILD, constants, sign_v4
 from .protocol.v5 import decode_verified_sample
@@ -35,9 +36,7 @@ def profile_from_balance_request(request, binary, *, response_member=None):
     if (request.get("method"), request.get("host"), request.get("path"), request.get("body", "")) != (
             "GET", "api.mcd.cn", "/bff/member/mwallet/balance", ""):
         raise EzMcdError("successful_balance_sample_required")
-    headers = {k.lower(): v for k, v in request["headers"].items()}
-    if len(headers) != len(request["headers"]):
-        raise EzMcdError("official_session_headers_incomplete")
+    headers = sample_headers(request.get("headers", {}))
     if (headers.get("ct") != "101" or headers.get("sv") != "v4" or
             any(not isinstance(headers.get(k), str) or not headers[k] for k in ("sid", "token", "v", "language"))):
         raise EzMcdError("official_session_headers_incomplete")
@@ -96,7 +95,7 @@ def update_runtime_request_text(store, alias, text):
 
 def runtime_from_sample(profile, sample, binary):
     request = sample.get("request", {})
-    headers = {k.lower(): v for k, v in request.get("headers", {}).items()}
+    headers = sample_headers(request.get("headers", {}))
     fields = profile.get("fields", {})
     if (request.get("host") != "api.mcd.cn" or request.get("path") != "/bff/order/orders"
             or request.get("method") != "POST" or not fields.get("sid") or not fields.get("deviceToken")

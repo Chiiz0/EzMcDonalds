@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a49`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
+**当前版本 `0.1.0a50`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
 
 **开始前先了解三个条件：**
 

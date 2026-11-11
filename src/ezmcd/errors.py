@@ -8,6 +8,9 @@ class EzMcdError(Exception):
 def error_result(code):
     """Actionable explanations from a fixed catalogue, never upstream secrets."""
     help_text = {
+        "private_json_duplicate_keys": ("私有JSON文件含重复字段，已停止读取，原文件保留。", "外部样本请重新导出；项目账号或记录文件请保留原件并核查备份，不手工选一个值覆盖，也不删除购买日志。错误不会输出字段名或凭据。"),
+        "official_sample_headers_invalid_or_repeated": ("官方请求样本含重复或无效的请求头，不能确定原始凭据。", "重新导出目标单次请求，保留原始头值；不要手工删除重复项或拼接不同请求。可使用私有 HAR 或复制请求入口，凭据不要发到聊天。"),
+        "official_sample_host_mismatch": ("请求样本的 Host 与支持的官方地址不一致。", "重新选择本人 api.mcd.cn 的原始余额或运行请求；不要修改 Host 后继续导入。"),
         "quote_authorization_requires_enabled_policy": ("按报价授权需要明确开启这一次消费。", "核对新鲜报价后，在本机使用 account policy --enable-checkout --quote-id；关闭消费时不要传入报价。"),
         "quote_outside_authorized_purchase": ("当前报价不属于本机已授权的那一餐。", "先查询原购买记录。门店、时间、取餐方式、商品配料、优惠或金额变化均需重新确认；不扩大额度、不换键重购。相同内容的新鲜报价可沿用原授权期限。"),
         "checkout_policy_expired": ("本地消费授权已到期，已停止后续下单或付款。", "先查看本地购买记录；已有或结果未知的尝试只查原单，不换键重购。重新授权不会自动重发已中断的付款。"),
