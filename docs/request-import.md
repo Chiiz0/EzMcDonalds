@@ -34,7 +34,7 @@ ezmcd account connect personal --request-file /absolute/path/request.txt
 
 ## 更新下单运行字段
 
-先按[发送前断点步骤](credentials.md#在发送订单前的断点取得请求头)取得**已阻断发送**的本人 `POST /bff/order/orders` 请求，或使用自己此前已授权操作留下的样本。确认请求被 Abort 并关闭官方 App 后，可将该条请求复制为 cURL/原始请求，运行：
+先准备本人此前已授权操作留下的有效 `POST /bff/order/orders` 样本，或本人外部调试工具已确认阻断发送的请求记录。样本须来自当前账号同一会话，采样时间在24小时内；完整要求见[运行字段导入](credentials.md#单独更新下单运行字段)。项目当前没有已验收的新运行字段采集入口，不能用钱包采样器保护测试提交，也不要为了取得样本额外购买。已有被阻断的记录须先确认请求已 Abort 并关闭官方 App，再将该条请求复制为 cURL/原始请求，运行：
 
 ```sh
 ezmcd account runtime personal --clipboard
