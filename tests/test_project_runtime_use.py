@@ -70,6 +70,72 @@ class RuntimeUseTests(unittest.TestCase):
         self.assertEqual(self.store.account("mine"), before)
         self.assertEqual(self.http.verify_runtime.call_count, 2)
 
+    def test_fourteen_day_permission_keeps_ten_day_observation_and_only_four_days_remaining(self):
+        self.record["runtime"]["observed_at"] = NOW-240*3600
+        self.store.modify_account("mine", lambda _: deepcopy(self.record))
+        with self.assertRaisesRegex(EzMcdError, "outside_limit"):
+            self.grant(168)
+        self.factory.assert_not_called()
+        self.grant(336)
+        updated = self.store.account("mine")
+        self.assertEqual(updated["runtime"], self.record["runtime"])
+        self.assertEqual(updated["policy"], self.record["policy"])
+        self.assertEqual(updated["runtime_use"]["expires_at"], NOW+96*3600)
+        self.assertTrue(available(updated, self.now))
+        self.now += 3600
+        self.assertFalse(self.grant(336)["changed"])
+        self.assertEqual(self.store.account("mine"), updated)
+        self.assertEqual(self.http.verify_runtime.call_count, 2)
+
+    def test_fourteen_day_boundary_and_slow_get_cannot_extend_observation(self):
+        self.record["runtime"]["observed_at"] = NOW-336*3600+1
+        self.store.modify_account("mine", lambda _: deepcopy(self.record))
+        self.grant(336)
+        before = self.store.account("mine")
+        self.now += 1
+        self.assertFalse(available(before, self.now))
+        self.factory.reset_mock()
+        with self.assertRaisesRegex(EzMcdError, "outside_limit"):
+            self.grant(336)
+        self.factory.assert_not_called()
+        self.assertEqual(self.store.account("mine"), before)
+        self.now -= 1
+        self.store.modify_account("mine", lambda _: deepcopy(self.record))
+        def expire(**kwargs):
+            self.now += 1
+            return ACCEPTED
+        self.http.verify_runtime.side_effect = expire
+        with self.assertRaisesRegex(EzMcdError, "outside_limit"):
+            self.grant(336)
+        self.assertEqual(self.store.account("mine"), self.record)
+
+    def test_higher_ceiling_does_not_extend_an_existing_seven_day_grant(self):
+        from ezmcd.runtime_check import check_runtime
+        self.grant(168)
+        before = self.store.account("mine")
+        self.now = before["runtime_use"]["expires_at"]+1
+        self.assertFalse(available(before, self.now))
+        result = check_runtime(self.store, "mine", transport_factory=self.factory, clock=lambda: self.now)
+        self.assertTrue(result["read_only_v5_verified"])
+        self.assertEqual(result["runtime_use"]["state"], "expired_or_changed")
+        self.assertEqual(self.store.account("mine"), before)
+
+    def test_ten_day_evidence_still_needs_a_single_use_order_check(self):
+        self.record["runtime"]["observed_at"] = NOW-240*3600
+        self.store.modify_account("mine", lambda _: deepcopy(self.record))
+        self.grant(336)
+        transport = self.transport()
+        with self.assertRaisesRegex(EzMcdError, "new_order_check"):
+            transport.send("POST", "/bff/order/orders", body=self.body)
+        transport._open.assert_not_called()
+        self.assertTrue(transport.prepare_order_runtime(self.body))
+        transport.send("POST", "/bff/order/orders", body=self.body)
+        self.assertEqual(transport._open.call_count, 2)
+        with self.assertRaisesRegex(EzMcdError, "new_order_check"):
+            transport.send("POST", "/bff/order/orders", body=self.body)
+        self.assertEqual(transport._open.call_count, 2)
+        self.assertFalse(self.store.account("mine")["policy"]["allow_checkout"])
+
     def test_revoke_is_local_and_keeps_evidence_policy_and_journal(self):
         self.grant(); self.factory.reset_mock()
         result = configure(self.store, "mine", transport_factory=self.factory, clock=lambda: self.now)
@@ -79,7 +145,7 @@ class RuntimeUseTests(unittest.TestCase):
         self.assertFalse(available(self.store.account("mine"), self.now))
 
     def test_invalid_limits_and_ineligible_accounts_stop_before_network_or_changes(self):
-        for hours in (True, 24, 169, 0, -1, 48.5, "168"):
+        for hours in (True, 24, 337, 0, -1, 48.5, "168"):
             with self.subTest(hours=hours), self.assertRaises(EzMcdError): self.grant(hours)
         variants = [{"runtime": None}, {"revoked": True}, {"provider": "demo"}]
         variants += [{"session_refresh": {"state": s}} for s in ("CLAIMED", "CANDIDATE", "STOPPED")]

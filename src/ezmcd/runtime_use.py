@@ -1,6 +1,6 @@
 """Explicit, bounded use of an existing observation; never evidence renewal.
 
-The local owner chooses the maximum age (up to seven days from observation).
+The local owner chooses the maximum age (up to fourteen days from observation).
 An authorization is bound to the exact credentials and sample. Its initial GET
 is not an order check: every historical order needs another, in-memory check.
 """
@@ -12,7 +12,7 @@ from .errors import EzMcdError
 from .models import fingerprint
 
 DEFAULT_HOURS = 24
-MAX_HOURS = 168  # Local product limit, not an official credential lifetime.
+MAX_HOURS = 336  # Explicit local experiment limit, not an official credential lifetime.
 
 
 def evidence_age(record, now):

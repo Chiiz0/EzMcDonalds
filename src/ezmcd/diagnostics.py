@@ -26,7 +26,7 @@ def credentials_guide():
             "下单运行字段可用 account runtime 单独更新，支持 --clipboard / --request-file；必须来自本人同会话的请求侧断点或已有授权样本。订单正文被丢弃，不重放。",
             "旧版 sampling-capture 因系统代理影响整机网络已停用。已有完整历史样本仍可sampling-import；缺少清理证据的失败目录不能导入。sampling-status只读报告网络状态，不修复或启动代理。",
             "同设备上下文可显式进行只读验证复用，但不能从登录凭据独立生成，不能延长原采样日期。",
-            "已有当前账号运行样本时，本机用户可选择 account runtime-use ALIAS --max-age-hours HOURS（25至168，从原采样时刻计算）。先做只读核验，历史字段每次下单前再核验；MCP不能开启或延长许可，消费仍需单独授权。--disable撤销复用，不联网。超过24小时的订单POST尚未实测。",
+            "已有当前账号运行样本时，本机用户可选择 account runtime-use ALIAS --max-age-hours HOURS（25至336，从原采样时刻计算）。先做只读核验，历史字段每次下单前再核验；MCP不能开启或延长许可，消费仍需单独授权。--disable撤销复用，不联网。超过24小时的订单POST尚未实测。",
             "不要为获取运行样本额外创建订单；同设备复用已完成一笔真实订单，长期运行字段更新仍待完成。",
             "确认可用后由用户在本机设置消费策略，再将 ezmcd mcp-config 输出交给个人 Agent。"],
         "account_label_is_not_authentication": True, "automatic_device_initialization": False}
