@@ -5,7 +5,7 @@
 [![Tests](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml/badge.svg)](https://github.com/Chiiz0/EzMcDonalds/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前版本 `0.1.0a45`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成一笔真实早餐卡自取订单和 ¥12.60 麦钱包付款，重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
+**当前版本 `0.1.0a46`：本地 Python CLI + 38 个 stdio MCP 工具，面向已注册会员的开发者 alpha。** 已通过 MCP 完成真实早餐卡自取订单和 ¥12.60 麦钱包付款，包括一笔使用约10天本人运行字段的预约单；重启重复调用未再次消费。更多商品、规格和普通券已有真实加购报价证据；不代表所有门店、商品和优惠都已支持。[能力矩阵](docs/capabilities.md) · [验证记录](docs/validation.md) · [更新日志](CHANGELOG.md)
 
 **开始前先了解三个条件：**
 
@@ -61,7 +61,7 @@ python3 -m venv .venv
 | 检查结果 | 可继续的操作 | 需要补齐的条件 |
 |---|---|---|
 | 会话有效，缺少下单运行字段 | 找店、看菜单、选券、准备购物车和报价 | 导入本人已有的有效运行样本，见[凭据指南](docs/credentials.md#为什么已登录还可能不能下单) |
-| 原运行样本超过默认24小时 | 保留账号和订单，继续可用的查询 | 更新本人证据，或由本机用户选择[显式限期复用](docs/runtime-use.md)；不改原采样日期，历史字段真实下单仍待验收 |
+| 原运行样本超过默认24小时 | 保留账号和订单，继续可用的查询 | 更新本人证据，或由本机用户选择[显式限期复用](docs/runtime-use.md)；不改原采样日期；约10天样本有单次真实下单付款证据，其他年龄和连续多日使用仍待验证 |
 | 会话失效或刷新结果未知 | 离线找回本地购买记录 | 按[会话维护](docs/session-maintenance.md)恢复，不重复发送未知刷新请求 |
 | 消费关闭、授权到期或余额不足 | 核对选餐方案、最终报价和付款缺口 | 由本人决定是否授权或在官方入口充值；Agent不能提高额度 |
 
