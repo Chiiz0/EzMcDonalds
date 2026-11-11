@@ -19,7 +19,7 @@ def error_result(code):
         "runtime_use_requires_new_order_check": ("该历史字段缺少针对当前订单的即时核验。", "重新取得报价并按原消费授权继续；项目必须重新执行只读核验，不能复用上一订单或上次进程的核验结果。"),
         "account_changed_before_checkout": ("准备下单时账号资料已变化。", "重新检查账号、消费授权和报价；没有使用旧快照继续创建订单。"),
         "unsupported_combo_group_schema": ("套餐轮次结构暂不支持，不能确定各组件的准确份数。", "重新读取商品详情；仅已核对的相同必选单项重复行可合并。其他结构请在官方 App 配置，再读取购物车核对。"),
-        "sampling_runtime_capture_suspended": ("旧版下单运行字段采样已停用，避免影响整机网络。", "可导入本人已有授权样本；sampling-connect 仅提供实验性钱包会话采样，不操作购物车。请勿为采样提交订单。"),
+        "sampling_runtime_capture_suspended": ("下单运行字段采样已停用：采样器退出后可能恢复直连，不能保证提交被阻断。", "不要为采样提交订单，也不要回退到系统代理。可导入本人已有授权样本；sampling-connect 仅采集钱包会话，不生成下单运行字段。sampling-status 可查看验证范围。"),
         "sampling_local_capture_unavailable": ("麦当劳进程采样未能在限时内就绪，系统代理未修改。", "查看本机 mitmproxy 网络扩展授权与安装状态；先关闭麦当劳。不会回退到系统代理，不要测试提交。"),
         "sampling_local_scope_invalid": ("本机采样范围或就绪记录不符合要求。", "本轮停止，不扩大到全部进程或系统代理；保留诊断记录，不操作购物车。"),
         "select_one_available_supported_modifier_choice": ("未选中一个可售且已支持的配料选项。", "重新查看实时商品详情，按组选择准确的key；收费加料须有明确加价，不能用免费选项代替用户选择或忽略费用。"),

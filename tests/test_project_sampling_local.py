@@ -171,9 +171,17 @@ class SamplingStatusTests(unittest.TestCase):
 
     def test_unsupported_platform_does_not_run_system_commands(self):
         with patch('ezmcd.sampling_status.platform.system',return_value='Linux'), \
+                patch('ezmcd.sampling_status.version',return_value='99.0'), \
                 patch('ezmcd.sampling_status.subprocess.run') as command:
             result=sampling_status()
         command.assert_not_called();self.assertEqual(result['proxy_status'],'unsupported_platform')
+        # Historical evidence must not be presented as a test of the current installation.
+        self.assertEqual(result['mitmproxy_version'],'99.0')
+        evidence=result['runtime_capture_suspension']
+        self.assertEqual(evidence['tested_platform'],'macOS')
+        self.assertEqual(evidence['tested_mitmproxy_version'],'12.3.1')
+        self.assertFalse(evidence['official_app_tested'])
+        self.assertFalse(result['runtime_capture_enabled'])
 
 
 class LocalImportTests(unittest.TestCase):

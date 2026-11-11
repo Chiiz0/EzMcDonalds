@@ -18,6 +18,15 @@ def sampling_status(service="Wi-Fi"):
     result = {"transport": TRANSPORT, "process_selector": LOCAL_MODE,
         "system_proxy_modified": False, "sampler_started": False,
         "runtime_capture_enabled": False, "native_acceptance": "wallet_connection_and_maintenance_verified_a39",
+        "runtime_capture_suspension": {
+            "reason": "sampler_exit_may_allow_direct_requests",
+            "evidence_scope": "synthetic_native_http_process",
+            "observed_on": "2026-11-11",
+            "tested_platform": "macOS",
+            "tested_mitmproxy_version": "12.3.1",
+            "tested_mitmproxy_rs_version": "0.12.15",
+            "official_app_tested": False,
+            "next_action": "不要为采样提交订单。可导入本人已有授权样本；钱包会话采样不生成下单运行字段。"},
         "mitmproxy_version": installed, "network_service": service,
         "proxy_status": "unsupported_platform", "order_created": False, "payment_attempted": False}
     if platform.system() != "Darwin":
