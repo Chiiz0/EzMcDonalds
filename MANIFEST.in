@@ -12,3 +12,5 @@ recursive-exclude analysis *
 recursive-exclude artifacts *
 recursive-exclude tests *
 recursive-include tests test_project_*.py
+# Research source is available in Git, not installed as a supported capability.
+prune experiments

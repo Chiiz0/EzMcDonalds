@@ -15,6 +15,8 @@
 
 本项目独立开发，非麦当劳官方项目。没有启用定时购买。
 
+**维护交接：** 接手开发先读[交接说明](docs/handoff.md)，其中列明当前能力、未完成项及验收顺序。最新只读运行字段实验的源码和合成测试位于 [experiments/readonly_runtime](experiments/readonly_runtime/README.md)；已观察到官方 v5 钱包请求，但尚未完成真实凭据导入，不属于正式 CLI/MCP 能力，也不进入安装包。
+
 ## 快速开始
 
 ```sh
